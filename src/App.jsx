@@ -64,6 +64,7 @@ function App() {
   const [emailSubject, setEmailSubject] = useState('')
   const [emailTemplate, setEmailTemplate] = useState('')
   const [entryError, setEntryError] = useState('')
+  const [sendError, setSendError] = useState('')
 
   const templateLoadedRef = useRef(false)
   const skipTemplateSaveRef = useRef(false)
@@ -176,13 +177,17 @@ function App() {
   const allFieldDefinitions = [...builtInFields, ...fieldDefinitions]
   const previewEntry = entries.find((entry) => entry.id === previewEntryId)
 
+  const getEntryValues = (entry) => {
+    const values = { companyName: entry.companyName }
+    fieldDefinitions.forEach((field) => {
+      values[field.key] = entry.fieldValues?.[field.key] || ''
+    })
+    return values
+  }
+
   const getPreviewValues = () => {
     if (previewEntry) {
-      const values = { companyName: previewEntry.companyName }
-      fieldDefinitions.forEach((field) => {
-        values[field.key] = previewEntry.fieldValues?.[field.key] || ''
-      })
-      return values
+      return getEntryValues(previewEntry)
     }
 
     const values = { companyName: companyName.trim() || 'Your Company' }
@@ -372,6 +377,40 @@ function App() {
     } catch (error) {
       setEntryError(error.message || 'Could not save entry.')
     }
+  }
+
+  const buildMailtoLink = (entry) => {
+    const values = getEntryValues(entry)
+    const subject = encodeURIComponent(fillTemplate(emailSubject, values))
+    const body = encodeURIComponent(fillTemplate(emailTemplate, values))
+    return `mailto:${entry.email}?subject=${subject}&body=${body}`
+  }
+
+  const handleSendEmails = () => {
+    setSendError('')
+
+    if (entries.length === 0) {
+      setSendError('Add at least one entry before sending.')
+      return
+    }
+
+    if (!emailTemplate.trim()) {
+      setSendError('Add an email template before sending.')
+      return
+    }
+
+    if (entries.length > 1) {
+      const shouldContinue = window.confirm(
+        `This will open ${entries.length} emails in your mail app. You may need to allow pop-ups. Continue?`
+      )
+      if (!shouldContinue) return
+    }
+
+    entries.forEach((entry, index) => {
+      setTimeout(() => {
+        window.open(buildMailtoLink(entry), '_blank')
+      }, index * 600)
+    })
   }
 
   if (!activeProjectId) {
@@ -705,6 +744,18 @@ function App() {
               ) : (
                 <p className="EmailTemplate-Empty">Write a subject or template above to see a preview</p>
               )}
+            </div>
+
+            <div className="EmailTemplate-Send">
+              <button
+                className="EmailTemplate-SendButton"
+                type="button"
+                onClick={handleSendEmails}
+                disabled={entries.length === 0}
+              >
+                Send Emails
+              </button>
+              {sendError && <p className="EmailTemplate-SendError">{sendError}</p>}
             </div>
           </div>
         </div>
