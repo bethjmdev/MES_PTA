@@ -401,3 +401,184 @@
   color: #8a919c;
   font-size: 0.9rem;
 }
+
+.ProjectPicker {
+  min-height: 100vh;
+  background: #f4f6f8;
+  padding: 2rem;
+}
+
+.ProjectPicker-Container {
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.ProjectPicker-Title {
+  margin: 0;
+  font-size: 1.75rem;
+  color: #1a1a2e;
+}
+
+.ProjectPicker-Subtitle {
+  margin: 0.35rem 0 0;
+  color: #5c6370;
+}
+
+.ProjectPicker-Create,
+.ProjectPicker-List {
+  background: #fff;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.ProjectPicker-SectionTitle {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+  color: #1a1a2e;
+}
+
+.ProjectPicker-Label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #3a3f4b;
+}
+
+.ProjectPicker-Input {
+  width: 100%;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.ProjectPicker-Input:focus {
+  outline: none;
+  border-color: #4a6cf7;
+  box-shadow: 0 0 0 2px rgba(74, 108, 247, 0.15);
+}
+
+.ProjectPicker-Hint {
+  margin: -0.5rem 0 1rem;
+  font-size: 0.85rem;
+  color: #8a919c;
+}
+
+.ProjectPicker-Error {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  color: #d14343;
+}
+
+.ProjectPicker-Button {
+  padding: 0.6rem 1.25rem;
+  background: #4a6cf7;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.ProjectPicker-Button:hover:not(:disabled) {
+  background: #3b5de0;
+}
+
+.ProjectPicker-Button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.ProjectPicker-Empty {
+  margin: 0;
+  color: #8a919c;
+}
+
+.ProjectPicker-Items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ProjectPicker-Item {
+  border-bottom: 1px solid #e8eaed;
+}
+
+.ProjectPicker-Item:last-child {
+  border-bottom: none;
+}
+
+.ProjectPicker-ItemButton {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.85rem 0.5rem;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.ProjectPicker-ItemButton:hover {
+  background: #f8f9fb;
+}
+
+.ProjectPicker-ItemName {
+  font-weight: 600;
+  color: #1a1a2e;
+}
+
+.ProjectPicker-ItemDatabase {
+  font-size: 0.85rem;
+  color: #8a919c;
+}
+
+.EntryForm-Header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.EntryForm-ProjectMeta {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+  color: #5c6370;
+}
+
+.EntryForm-ProjectMeta code {
+  background: #f0f2f5;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.EntryForm-SwitchButton {
+  padding: 0.5rem 0.85rem;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  color: #5c6370;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.EntryForm-SwitchButton:hover {
+  background: #f8f9fb;
+}
+
+.EntryForm-Error {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: #d14343;
+}
