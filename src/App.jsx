@@ -10,7 +10,7 @@ import { db } from './firebase/firebase'
 import './App.css'
 
 const activeProjectStorageKey = 'mesPtaActiveProjectId'
-const builtInEntryKeys = ['email', 'companyName', 'projectId']
+const builtInEntryKeys = ['email', 'companyName', 'projectId', 'email_sent']
 
 const toPlaceholder = (key) => `{{${key}}}`
 
@@ -36,6 +36,7 @@ const parseEntryDoc = (entryDoc) => {
     id: entryDoc.id,
     email: data.email || '',
     companyName: data.companyName || '',
+    emailSent: data.email_sent || 'N',
     fieldValues,
   }
 }
@@ -366,7 +367,10 @@ function App() {
         await updateDoc(doc(db, databaseName, editingEntryId), entryData)
         setPreviewEntryId(editingEntryId)
       } else {
-        const entryDoc = await addDoc(collection(db, databaseName), entryData)
+        const entryDoc = await addDoc(collection(db, databaseName), {
+          ...entryData,
+          email_sent: 'N',
+        })
         setPreviewEntryId(entryDoc.id)
       }
 
@@ -386,11 +390,13 @@ function App() {
     return `mailto:${entry.email}?subject=${subject}&body=${body}`
   }
 
-  const handleSendEmails = () => {
+  const unsentEntries = entries.filter((entry) => entry.emailSent !== 'Y')
+
+  const handleSendEmails = async () => {
     setSendError('')
 
-    if (entries.length === 0) {
-      setSendError('Add at least one entry before sending.')
+    if (unsentEntries.length === 0) {
+      setSendError('No unsent entries. All emails are already marked as sent.')
       return
     }
 
@@ -399,18 +405,34 @@ function App() {
       return
     }
 
-    if (entries.length > 1) {
+    if (unsentEntries.length > 1) {
       const shouldContinue = window.confirm(
-        `This will open ${entries.length} emails in your mail app. You may need to allow pop-ups. Continue?`
+        `This will open ${unsentEntries.length} emails in your mail app and mark them as sent. You may need to allow pop-ups. Continue?`
       )
       if (!shouldContinue) return
     }
 
-    entries.forEach((entry, index) => {
+    const databaseName = activeDatabaseNameRef.current || activeProject?.databaseName
+    if (!databaseName) {
+      setSendError('Project is still loading. Try again in a moment.')
+      return
+    }
+
+    unsentEntries.forEach((entry, index) => {
       setTimeout(() => {
         window.open(buildMailtoLink(entry), '_blank')
       }, index * 600)
     })
+
+    try {
+      await Promise.all(
+        unsentEntries.map((entry) =>
+          updateDoc(doc(db, databaseName, entry.id), { email_sent: 'Y' })
+        )
+      )
+    } catch (error) {
+      setSendError(error.message || 'Could not update sent status.')
+    }
   }
 
   if (!activeProjectId) {
@@ -504,76 +526,158 @@ function App() {
           </button>
         </div>
 
-        <div className="EntryForm-Row">
-          <div className="EntryForm-Left">
-            <div className="EntryForm-FieldSetup">
-              <div className="EntryForm-FieldSetupHeader">
-                <h3 className="EntryForm-FieldSetupTitle">
-                  Dynamic Fields
-                  {fieldDefinitions.length > 0 && (
-                    <span className="EntryForm-FieldSetupCount"> ({fieldDefinitions.length})</span>
-                  )}
-                </h3>
+        <div className="EntryForm-FieldSetup">
+          <div className="EntryForm-FieldSetupHeader">
+            <h3 className="EntryForm-FieldSetupTitle">
+              Dynamic Fields
+              {fieldDefinitions.length > 0 && (
+                <span className="EntryForm-FieldSetupCount"> ({fieldDefinitions.length})</span>
+              )}
+            </h3>
+            <button
+              className="EntryForm-FieldSetupToggle"
+              type="button"
+              onClick={() => setFieldSetupOpen((open) => !open)}
+            >
+              {fieldSetupOpen ? 'Minimize' : 'Expand'}
+            </button>
+          </div>
+
+          {fieldSetupOpen && (
+            <>
+              <p className="EntryForm-FieldSetupHint">
+                Field keys are saved to this project and stored on documents in the{' '}
+                <code>{activeProject?.databaseName}</code> collection.
+              </p>
+
+              {fieldDefinitions.length > 0 && (
+                <ul className="EntryForm-FieldList">
+                  {fieldDefinitions.map((field) => (
+                    <li key={field.id} className="EntryForm-FieldListItem">
+                      <span className="EntryForm-FieldListLabel">{field.label}</span>
+                      <code className="EntryForm-FieldListCode">{toPlaceholder(field.key)}</code>
+                      <button
+                        className="EntryForm-FieldRemove"
+                        type="button"
+                        onClick={() => handleRemoveFieldDefinition(field.id)}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="EntryForm-FieldAdd">
+                <input
+                  className="EntryForm-Input EntryForm-FieldAddInput"
+                  type="text"
+                  value={newFieldLabel}
+                  onChange={(e) => setNewFieldLabel(e.target.value)}
+                  placeholder="Label (e.g. Contact Name)"
+                />
+                <input
+                  className="EntryForm-Input EntryForm-FieldAddInput"
+                  type="text"
+                  value={newFieldKey}
+                  onChange={(e) => setNewFieldKey(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
+                  placeholder="Key (e.g. contactName, letters and numbers only)"
+                />
                 <button
-                  className="EntryForm-FieldSetupToggle"
+                  className="EntryForm-Button EntryForm-FieldAddButton"
                   type="button"
-                  onClick={() => setFieldSetupOpen((open) => !open)}
+                  onClick={handleAddFieldDefinition}
                 >
-                  {fieldSetupOpen ? 'Minimize' : 'Expand'}
+                  Add Field
                 </button>
               </div>
+            </>
+          )}
+        </div>
 
-              {fieldSetupOpen && (
+        {/* <div className="EmailTemplate">
+          <div className="EmailTemplate-Container">
+            <h2 className="EmailTemplate-Title">Email Template</h2>
+            <p className="EmailTemplate-Hint">
+              Saved to this project in Firebase. Use placeholders like{' '}
+              {allFieldDefinitions.map((field, index) => (
+                <span key={field.key}>
+                  {index > 0 && ', '}
+                  <code>{toPlaceholder(field.key)}</code>
+                </span>
+              ))}{' '}
+              in the subject and body.
+            </p>
+
+            <label className="EmailTemplate-Label" htmlFor="emailSubject">
+              Subject
+            </label>
+            <input
+              id="emailSubject"
+              className="EmailTemplate-Input"
+              type="text"
+              value={emailSubject}
+              onChange={(e) => setEmailSubject(e.target.value)}
+              placeholder={`Follow up with ${toPlaceholder('companyName')}`}
+            />
+
+            <label className="EmailTemplate-Label" htmlFor="emailTemplate">
+              Template
+            </label>
+            <textarea
+              id="emailTemplate"
+              className="EmailTemplate-Textarea"
+              value={emailTemplate}
+              onChange={(e) => setEmailTemplate(e.target.value)}
+              placeholder={`Hi ${toPlaceholder('companyName')},\n\nWe wanted to reach out about ${toPlaceholder('contactName')}...`}
+              rows={6}
+            />
+
+            <h3 className="EmailTemplate-PreviewTitle">Preview</h3>
+            <p className="EmailTemplate-PreviewHint">
+              {previewEntry ? (
                 <>
-                  <p className="EntryForm-FieldSetupHint">
-                    Field keys are saved to this project and stored on documents in the{' '}
-                    <code>{activeProject?.databaseName}</code> collection.
-                  </p>
-
-                  {fieldDefinitions.length > 0 && (
-                    <ul className="EntryForm-FieldList">
-                      {fieldDefinitions.map((field) => (
-                        <li key={field.id} className="EntryForm-FieldListItem">
-                          <span className="EntryForm-FieldListLabel">{field.label}</span>
-                          <code className="EntryForm-FieldListCode">{toPlaceholder(field.key)}</code>
-                          <button
-                            className="EntryForm-FieldRemove"
-                            type="button"
-                            onClick={() => handleRemoveFieldDefinition(field.id)}
-                          >
-                            Remove
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-
-                  <div className="EntryForm-FieldAdd">
-                    <input
-                      className="EntryForm-Input EntryForm-FieldAddInput"
-                      type="text"
-                      value={newFieldLabel}
-                      onChange={(e) => setNewFieldLabel(e.target.value)}
-                      placeholder="Label (e.g. Contact Name)"
-                    />
-                    <input
-                      className="EntryForm-Input EntryForm-FieldAddInput"
-                      type="text"
-                      value={newFieldKey}
-                      onChange={(e) => setNewFieldKey(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
-                      placeholder="Key (e.g. contactName, letters and numbers only)"
-                    />
-                    <button
-                      className="EntryForm-Button EntryForm-FieldAddButton"
-                      type="button"
-                      onClick={handleAddFieldDefinition}
-                    >
-                      Add Field
-                    </button>
-                  </div>
+                  Previewing entry for <strong>{previewEntry.email}</strong> ({previewEntry.companyName})
                 </>
+              ) : (
+                <>Add an entry below to preview with real values</>
+              )}
+            </p>
+            <div className="EmailTemplate-Preview">
+              {emailSubject.trim() || emailTemplate.trim() ? (
+                <>
+                  {emailSubject.trim() && (
+                    <p className="EmailTemplate-PreviewSubject">
+                      <span className="EmailTemplate-PreviewSubjectLabel">Subject:</span>{' '}
+                      {previewSubject}
+                    </p>
+                  )}
+                  {emailTemplate.trim() && (
+                    <pre className="EmailTemplate-PreviewText">{previewText}</pre>
+                  )}
+                </>
+              ) : (
+                <p className="EmailTemplate-Empty">Write a subject or template above to see a preview</p>
               )}
             </div>
+
+            <div className="EmailTemplate-Send">
+              <button
+                className="EmailTemplate-SendButton"
+                type="button"
+                onClick={handleSendEmails}
+                disabled={unsentEntries.length === 0}
+              >
+                Send Emails
+              </button>
+              {sendError && <p className="EmailTemplate-SendError">{sendError}</p>}
+            </div>
+          </div>
+        </div> */}
+
+        <div className="EntryForm-Row">
+          <div className="EntryForm-Left">
+            <h2 className="EntryForm-SectionTitle">Add Entry</h2>
 
             <label className="EntryForm-Label" htmlFor="email">
               Email
@@ -663,6 +767,13 @@ function App() {
                     >
                       <span className="EntryForm-ListEmail">{entry.email}</span>
                       <span className="EntryForm-ListCompany">{entry.companyName}</span>
+                      <span
+                        className={`EntryForm-ListStatus${
+                          entry.emailSent === 'Y' ? ' EntryForm-ListStatus--Sent' : ''
+                        }`}
+                      >
+                        {entry.emailSent === 'Y' ? 'Sent' : 'Not sent'}
+                      </span>
                       {fieldDefinitions.map((field) => {
                         const value = entry.fieldValues?.[field.key]
                         if (!value) return null
@@ -678,9 +789,7 @@ function App() {
               </ul>
             )}
           </div>
-        </div>
-
-        <div className="EmailTemplate">
+        </div>       <div className="EmailTemplate">
           <div className="EmailTemplate-Container">
             <h2 className="EmailTemplate-Title">Email Template</h2>
             <p className="EmailTemplate-Hint">
@@ -725,7 +834,7 @@ function App() {
                   Previewing entry for <strong>{previewEntry.email}</strong> ({previewEntry.companyName})
                 </>
               ) : (
-                <>Add an entry above to preview with real values</>
+                <>Add an entry below to preview with real values</>
               )}
             </p>
             <div className="EmailTemplate-Preview">
@@ -751,7 +860,7 @@ function App() {
                 className="EmailTemplate-SendButton"
                 type="button"
                 onClick={handleSendEmails}
-                disabled={entries.length === 0}
+                disabled={unsentEntries.length === 0}
               >
                 Send Emails
               </button>

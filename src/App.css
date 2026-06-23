@@ -173,16 +173,33 @@
   color: #8a919c;
 }
 
+.EntryForm-ListStatus {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #d97706;
+}
+
+.EntryForm-ListStatus--Sent {
+  color: #16a34a;
+}
+
 .EntryForm-Fields {
   margin-bottom: 0.25rem;
 }
 
 .EntryForm-FieldSetup {
-  margin: 0 0 1.25rem;
-  padding: 1rem;
+  margin: 0;
+  padding: 1.5rem;
   border: 1px solid #e8eaed;
   border-radius: 8px;
-  background: #f8f9fb;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.EntryForm-SectionTitle {
+  margin: 0 0 1.25rem;
+  font-size: 1.25rem;
+  color: #1a1a2e;
 }
 
 .EntryForm-FieldSetupHeader {
