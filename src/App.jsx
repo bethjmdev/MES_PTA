@@ -114,6 +114,7 @@ function App() {
           id: field.key,
           key: field.key,
           label: field.label,
+          active: field.active !== false,
         }))
       )
       setEmailTemplate(data.email || '')
@@ -175,12 +176,14 @@ function App() {
   }, [emailTemplate, emailSubject, activeProjectId])
 
   const builtInFields = [{ key: 'companyName', label: 'Company Name' }]
-  const allFieldDefinitions = [...builtInFields, ...fieldDefinitions]
+  const activeFieldDefinitions = fieldDefinitions.filter((field) => field.active)
+  const inactiveFieldDefinitions = fieldDefinitions.filter((field) => !field.active)
+  const allFieldDefinitions = [...builtInFields, ...activeFieldDefinitions]
   const previewEntry = entries.find((entry) => entry.id === previewEntryId)
 
   const getEntryValues = (entry) => {
     const values = { companyName: entry.companyName }
-    fieldDefinitions.forEach((field) => {
+    activeFieldDefinitions.forEach((field) => {
       values[field.key] = entry.fieldValues?.[field.key] || ''
     })
     return values
@@ -192,7 +195,7 @@ function App() {
     }
 
     const values = { companyName: companyName.trim() || 'Your Company' }
-    fieldDefinitions.forEach((field) => {
+    activeFieldDefinitions.forEach((field) => {
       values[field.key] = fieldValues[field.key]?.trim() || `Your ${field.label}`
     })
     return values
@@ -206,7 +209,11 @@ function App() {
     if (!activeProjectId) return
 
     await updateDoc(doc(db, 'Projects', activeProjectId), {
-      fields: fields.map(({ key, label }) => ({ key, label })),
+      fields: fields.map(({ key, label, active }) => ({
+        key,
+        label,
+        active: active !== false,
+      })),
     })
   }
 
@@ -283,9 +290,17 @@ function App() {
     const key = newFieldKey.trim()
     const label = newFieldLabel.trim()
     if (!key || !label) return
-    if (allFieldDefinitions.some((field) => field.key === key)) return
+    if (key === 'companyName') return
 
-    const nextFields = [...fieldDefinitions, { id: key, key, label }]
+    const existingField = fieldDefinitions.find((field) => field.key === key)
+    if (existingField?.active) return
+
+    const nextFields = existingField
+      ? fieldDefinitions.map((field) =>
+          field.key === key ? { ...field, label, active: true } : field
+        )
+      : [...fieldDefinitions, { id: key, key, label, active: true }]
+
     setFieldDefinitions(nextFields)
     setNewFieldKey('')
     setNewFieldLabel('')
@@ -299,7 +314,9 @@ function App() {
 
   const handleRemoveFieldDefinition = async (id) => {
     const field = fieldDefinitions.find((item) => item.id === id)
-    const nextFields = fieldDefinitions.filter((item) => item.id !== id)
+    const nextFields = fieldDefinitions.map((item) =>
+      item.id === id ? { ...item, active: false } : item
+    )
     setFieldDefinitions(nextFields)
 
     if (field) {
@@ -314,6 +331,19 @@ function App() {
       await saveProjectFields(nextFields)
     } catch {
       setEntryError('Could not remove field definition.')
+    }
+  }
+
+  const handleRestoreFieldDefinition = async (id) => {
+    const nextFields = fieldDefinitions.map((item) =>
+      item.id === id ? { ...item, active: true } : item
+    )
+    setFieldDefinitions(nextFields)
+
+    try {
+      await saveProjectFields(nextFields)
+    } catch {
+      setEntryError('Could not restore field definition.')
     }
   }
 
@@ -337,6 +367,7 @@ function App() {
   const buildEntryData = () => {
     const savedFieldValues = {}
     fieldDefinitions.forEach((field) => {
+      if (!field.active) return
       savedFieldValues[field.key] = fieldValues[field.key]?.trim() || ''
     })
 
@@ -530,8 +561,8 @@ function App() {
           <div className="EntryForm-FieldSetupHeader">
             <h3 className="EntryForm-FieldSetupTitle">
               Dynamic Fields
-              {fieldDefinitions.length > 0 && (
-                <span className="EntryForm-FieldSetupCount"> ({fieldDefinitions.length})</span>
+              {activeFieldDefinitions.length > 0 && (
+                <span className="EntryForm-FieldSetupCount"> ({activeFieldDefinitions.length})</span>
               )}
             </h3>
             <button
@@ -550,9 +581,9 @@ function App() {
                 <code>{activeProject?.databaseName}</code> collection.
               </p>
 
-              {fieldDefinitions.length > 0 && (
+              {activeFieldDefinitions.length > 0 && (
                 <ul className="EntryForm-FieldList">
-                  {fieldDefinitions.map((field) => (
+                  {activeFieldDefinitions.map((field) => (
                     <li key={field.id} className="EntryForm-FieldListItem">
                       <span className="EntryForm-FieldListLabel">{field.label}</span>
                       <code className="EntryForm-FieldListCode">{toPlaceholder(field.key)}</code>
@@ -574,14 +605,14 @@ function App() {
                   type="text"
                   value={newFieldLabel}
                   onChange={(e) => setNewFieldLabel(e.target.value)}
-                  placeholder="Label (e.g. Contact Name)"
+                  placeholder="In App Label (e.g. Contact Name)"
                 />
                 <input
                   className="EntryForm-Input EntryForm-FieldAddInput"
                   type="text"
                   value={newFieldKey}
                   onChange={(e) => setNewFieldKey(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
-                  placeholder="Key (e.g. contactName, letters and numbers only)"
+                  placeholder="Database Item Name (e.g. contactName, letters and numbers only)"
                 />
                 <button
                   className="EntryForm-Button EntryForm-FieldAddButton"
@@ -591,6 +622,30 @@ function App() {
                   Add Field
                 </button>
               </div>
+
+              {inactiveFieldDefinitions.length > 0 && (
+                <div className="EntryForm-FieldInactive">
+                  <h4 className="EntryForm-FieldInactiveTitle">Removed Fields</h4>
+                  <p className="EntryForm-FieldInactiveHint">
+                    These fields are hidden but still saved. Add one back anytime.
+                  </p>
+                  <ul className="EntryForm-FieldList">
+                    {inactiveFieldDefinitions.map((field) => (
+                      <li key={field.id} className="EntryForm-FieldListItem">
+                        <span className="EntryForm-FieldListLabel">{field.label}</span>
+                        <code className="EntryForm-FieldListCode">{toPlaceholder(field.key)}</code>
+                        <button
+                          className="EntryForm-FieldRestore"
+                          type="button"
+                          onClick={() => handleRestoreFieldDefinition(field.id)}
+                        >
+                          Add Back
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -703,9 +758,9 @@ function App() {
               placeholder="Enter company name"
             />
 
-            {fieldDefinitions.length > 0 && (
+            {activeFieldDefinitions.length > 0 && (
               <div className="EntryForm-Fields">
-                {fieldDefinitions.map((field) => (
+                {activeFieldDefinitions.map((field) => (
                   <div key={field.id} className="EntryForm-FieldRow">
                     <label className="EntryForm-Label" htmlFor={`field-${field.key}`}>
                       {field.label}
@@ -774,7 +829,7 @@ function App() {
                       >
                         {entry.emailSent === 'Y' ? 'Sent' : 'Not sent'}
                       </span>
-                      {fieldDefinitions.map((field) => {
+                      {activeFieldDefinitions.map((field) => {
                         const value = entry.fieldValues?.[field.key]
                         if (!value) return null
                         return (

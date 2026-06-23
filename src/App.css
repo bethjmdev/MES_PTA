@@ -303,6 +303,39 @@
   margin-top: 0;
 }
 
+.EntryForm-FieldInactive {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #e8eaed;
+}
+
+.EntryForm-FieldInactiveTitle {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  color: #1a1a2e;
+}
+
+.EntryForm-FieldInactiveHint {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: #8a919c;
+}
+
+.EntryForm-FieldRestore {
+  margin-left: auto;
+  padding: 0.25rem 0.5rem;
+  background: #f0f4ff;
+  border: 1px solid #c7d4fc;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  color: #4a6cf7;
+  cursor: pointer;
+}
+
+.EntryForm-FieldRestore:hover {
+  background: #e4ebff;
+}
+
 .EmailTemplate {
   width: 100%;
 }
