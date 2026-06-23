@@ -78,10 +78,38 @@
   background: #3b5de0;
 }
 
+.EntryForm-Actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.EntryForm-Button--Cancel {
+  background: #fff;
+  color: #5c6370;
+  border: 1px solid #d0d5dd;
+}
+
+.EntryForm-Button--Cancel:hover {
+  background: #f8f9fb;
+}
+
+.EntryForm-EditHint {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: #4a6cf7;
+}
+
 .EntryForm-ListTitle {
-  margin: 0 0 1rem;
+  margin: 0 0 0.35rem;
   font-size: 1.25rem;
   color: #1a1a2e;
+}
+
+.EntryForm-ListHint {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: #8a919c;
 }
 
 .EntryForm-Empty {
@@ -96,11 +124,35 @@
 }
 
 .EntryForm-ListItem {
+  padding: 0;
+  border-bottom: 1px solid #e8eaed;
+}
+
+.EntryForm-ListItem--Active .EntryForm-ListButton {
+  background: #f0f4ff;
+  border-color: #c7d4fc;
+}
+
+.EntryForm-ListItem--Editing .EntryForm-ListButton {
+  box-shadow: inset 0 0 0 2px #4a6cf7;
+}
+
+.EntryForm-ListButton {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 0.25rem;
-  padding: 0.75rem 0;
-  border-bottom: 1px solid #e8eaed;
+  width: 100%;
+  padding: 0.75rem;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.EntryForm-ListButton:hover {
+  background: #f8f9fb;
 }
 
 .EntryForm-ListItem:last-child {
@@ -114,6 +166,124 @@
 
 .EntryForm-ListCompany {
   color: #5c6370;
+}
+
+.EntryForm-ListField {
+  font-size: 0.85rem;
+  color: #8a919c;
+}
+
+.EntryForm-Fields {
+  margin-bottom: 0.25rem;
+}
+
+.EntryForm-FieldSetup {
+  margin: 0 0 1.25rem;
+  padding: 1rem;
+  border: 1px solid #e8eaed;
+  border-radius: 8px;
+  background: #f8f9fb;
+}
+
+.EntryForm-FieldSetupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.EntryForm-FieldSetupTitle {
+  margin: 0;
+  font-size: 1rem;
+  color: #1a1a2e;
+}
+
+.EntryForm-FieldSetupCount {
+  font-weight: 400;
+  color: #8a919c;
+}
+
+.EntryForm-FieldSetupToggle {
+  padding: 0.35rem 0.65rem;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #5c6370;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.EntryForm-FieldSetupToggle:hover {
+  background: #f0f2f5;
+}
+
+.EntryForm-FieldSetupHint {
+  margin: 0.75rem 0 1rem;
+  font-size: 0.85rem;
+  color: #8a919c;
+}
+
+.EntryForm-FieldList {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+.EntryForm-FieldListItem {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.EntryForm-FieldListItem:last-child {
+  border-bottom: none;
+}
+
+.EntryForm-FieldListLabel {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #3a3f4b;
+}
+
+.EntryForm-FieldListCode {
+  background: #f0f2f5;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.EntryForm-FieldRemove {
+  margin-left: auto;
+  padding: 0.25rem 0.5rem;
+  background: none;
+  border: 1px solid #d0d5dd;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  color: #5c6370;
+  cursor: pointer;
+}
+
+.EntryForm-FieldRemove:hover {
+  background: #f8f9fb;
+}
+
+.EntryForm-FieldAdd {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.EntryForm-FieldAddInput {
+  margin-bottom: 0;
+}
+
+.EntryForm-FieldAddButton {
+  align-self: flex-start;
+  margin-top: 0;
 }
 
 .EmailTemplate {
