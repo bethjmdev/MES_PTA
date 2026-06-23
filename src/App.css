@@ -6,10 +6,16 @@
 
 .EntryForm-Container {
   display: flex;
+  flex-direction: column;
   gap: 2rem;
   max-width: 960px;
   margin: 0 auto;
   min-height: calc(100vh - 4rem);
+}
+
+.EntryForm-Row {
+  display: flex;
+  gap: 2rem;
 }
 
 .EntryForm-Left {
@@ -108,4 +114,120 @@
 
 .EntryForm-ListCompany {
   color: #5c6370;
+}
+
+.EmailTemplate {
+  width: 100%;
+}
+
+.EmailTemplate-Container {
+  background: #fff;
+  border-radius: 8px;
+  padding: 2rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.EmailTemplate-Title {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  color: #1a1a2e;
+}
+
+.EmailTemplate-Hint {
+  margin: 0 0 1.25rem;
+  font-size: 0.9rem;
+  color: #5c6370;
+}
+
+.EmailTemplate-Hint code {
+  background: #f0f2f5;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.EmailTemplate-Label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #3a3f4b;
+}
+
+.EmailTemplate-Input {
+  width: 100%;
+  margin-bottom: 1.25rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-family: inherit;
+}
+
+.EmailTemplate-Input:focus {
+  outline: none;
+  border-color: #4a6cf7;
+  box-shadow: 0 0 0 2px rgba(74, 108, 247, 0.15);
+}
+
+.EmailTemplate-Textarea {
+  width: 100%;
+  margin-bottom: 1.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.EmailTemplate-Textarea:focus {
+  outline: none;
+  border-color: #4a6cf7;
+  box-shadow: 0 0 0 2px rgba(74, 108, 247, 0.15);
+}
+
+.EmailTemplate-PreviewTitle {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  color: #1a1a2e;
+}
+
+.EmailTemplate-PreviewHint {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: #8a919c;
+}
+
+.EmailTemplate-Preview {
+  background: #f8f9fb;
+  border: 1px solid #e8eaed;
+  border-radius: 6px;
+  padding: 1rem;
+  min-height: 4rem;
+}
+
+.EmailTemplate-PreviewSubject {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  color: #1a1a2e;
+}
+
+.EmailTemplate-PreviewSubjectLabel {
+  font-weight: 600;
+}
+
+.EmailTemplate-PreviewText {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 0.95rem;
+  color: #1a1a2e;
+  line-height: 1.5;
+}
+
+.EmailTemplate-Empty {
+  margin: 0;
+  color: #8a919c;
+  font-size: 0.9rem;
 }
