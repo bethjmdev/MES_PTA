@@ -133,6 +133,16 @@
   background: #f8f9fb;
 }
 
+.EntryForm-Button--Delete {
+  background: #fff;
+  color: #d14343;
+  border: 1px solid #fecaca;
+}
+
+.EntryForm-Button--Delete:hover {
+  background: #fef2f2;
+}
+
 .EntryForm-EditHint {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
@@ -209,7 +219,7 @@
   color: #1a1a2e;
 }
 
-.EntryForm-ListCompany {
+.EntryForm-ListRecipientName {
   color: #5c6370;
 }
 
@@ -228,8 +238,103 @@
   color: #16a34a;
 }
 
+.EntryForm-ListPagination {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e8eaed;
+}
+
+.EntryForm-ListPagination-Info {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: #5c6370;
+}
+
+.EntryForm-ListPagination-Controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.EntryForm-ListPagination-Button {
+  padding: 0.35rem 0.6rem;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #1a1a2e;
+  cursor: pointer;
+}
+
+.EntryForm-ListPagination-Button:hover:not(:disabled) {
+  background: #f8f9fb;
+}
+
+.EntryForm-ListPagination-Button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.EntryForm-ListPagination-Page {
+  padding: 0 0.35rem;
+  font-size: 0.85rem;
+  color: #5c6370;
+}
+
 .EntryForm-Fields {
   margin-bottom: 0.25rem;
+}
+
+.EntryForm-SetupSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.EntryForm-SetupSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+.EntryForm-SetupSectionTitle {
+  margin: 0;
+  margin-right: auto;
+  font-size: 1rem;
+  color: #1a1a2e;
+}
+
+.EntryForm-SetupSectionCount {
+  font-weight: 400;
+  color: #8a919c;
+}
+
+.EntryForm-SetupSectionToggle {
+  padding: 0.35rem 0.65rem;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #5c6370;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.EntryForm-SetupSectionToggle:hover {
+  background: #f0f2f5;
+}
+
+.EntryForm-SetupSection--Collapsed .EntryForm-SetupSectionHeader {
+  margin: 0;
+  padding: 1.5rem;
+  border: 1px solid #e8eaed;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  justify-content: space-between;
 }
 
 .EntryForm-SetupRow {
@@ -246,6 +351,9 @@
 .EntryForm-SetupRow-Import {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .EntryForm-FieldSetup {
@@ -272,32 +380,10 @@
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 
-.EntryForm-ImportHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
 .EntryForm-ImportTitle {
-  margin: 0;
+  margin: 0 0 0.75rem;
   font-size: 1rem;
   color: #1a1a2e;
-}
-
-.EntryForm-ImportToggle {
-  padding: 0.35rem 0.65rem;
-  background: #fff;
-  border: 1px solid #d0d5dd;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  color: #5c6370;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.EntryForm-ImportToggle:hover {
-  background: #f0f2f5;
 }
 
 .EntryForm-ImportHint {
@@ -344,15 +430,34 @@
   word-break: break-all;
 }
 
-.EntryForm-FieldSetupHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+.EntryForm-Export {
+  margin: 0;
+  padding: 1.5rem;
+  border: 1px solid #e8eaed;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.EntryForm-ExportTitle {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  color: #1a1a2e;
+}
+
+.EntryForm-ExportHint {
+  margin: 0.75rem 0 1rem;
+  font-size: 0.85rem;
+  color: #5c6370;
+  line-height: 1.5;
+}
+
+.EntryForm-ExportButton {
+  margin-top: 0;
 }
 
 .EntryForm-FieldSetupTitle {
-  margin: 0;
+  margin: 0 0 0.75rem;
   font-size: 1rem;
   color: #1a1a2e;
 }
@@ -360,21 +465,6 @@
 .EntryForm-FieldSetupCount {
   font-weight: 400;
   color: #8a919c;
-}
-
-.EntryForm-FieldSetupToggle {
-  padding: 0.35rem 0.65rem;
-  background: #fff;
-  border: 1px solid #d0d5dd;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  color: #5c6370;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.EntryForm-FieldSetupToggle:hover {
-  background: #f0f2f5;
 }
 
 .EntryForm-FieldSetupHint {
@@ -765,6 +855,114 @@
   color: #8a919c;
 }
 
+.ProjectPicker-ItemDate {
+  font-size: 0.8rem;
+  color: #8a919c;
+}
+
+.ProjectDelete {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(26, 26, 46, 0.45);
+}
+
+.ProjectDelete-Container {
+  width: 100%;
+  max-width: 420px;
+  padding: 1.5rem;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.ProjectDelete-Title {
+  margin: 0 0 0.75rem;
+  font-size: 1.25rem;
+  color: #1a1a2e;
+}
+
+.ProjectDelete-Hint {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  color: #5c6370;
+  line-height: 1.5;
+}
+
+.ProjectDelete-Hint code {
+  background: #f0f2f5;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.ProjectDelete-Label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #3a3f4b;
+}
+
+.ProjectDelete-Input {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.ProjectDelete-Input:focus {
+  outline: none;
+  border-color: #4a6cf7;
+  box-shadow: 0 0 0 2px rgba(74, 108, 247, 0.15);
+}
+
+.ProjectDelete-Error {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: #d14343;
+}
+
+.ProjectDelete-Actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.ProjectDelete-Button {
+  padding: 0.6rem 1rem;
+  background: #d14343;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.ProjectDelete-Button:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.ProjectDelete-Button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ProjectDelete-Button--Cancel {
+  background: #fff;
+  color: #5c6370;
+  border: 1px solid #d0d5dd;
+}
+
+.ProjectDelete-Button--Cancel:hover:not(:disabled) {
+  background: #f8f9fb;
+}
+
 .EntryForm-Header {
   display: flex;
   align-items: flex-start;
@@ -785,6 +983,12 @@
   font-size: 0.85rem;
 }
 
+.EntryForm-HeaderActions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
 .EntryForm-SwitchButton {
   padding: 0.5rem 0.85rem;
   background: #fff;
@@ -798,6 +1002,21 @@
 
 .EntryForm-SwitchButton:hover {
   background: #f8f9fb;
+}
+
+.EntryForm-DeleteButton {
+  padding: 0.5rem 0.85rem;
+  background: #fff;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  color: #d14343;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.EntryForm-DeleteButton:hover {
+  background: #fef2f2;
 }
 
 .EntryForm-Error {

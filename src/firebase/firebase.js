@@ -17,7 +17,14 @@ const app = initializeApp(firebaseConfig)
 export const db = getFirestore(app)
 export const functions = getFunctions(app)
 
-export const analytics =
-  typeof window !== 'undefined' ? getAnalytics(app) : null
+export const analytics = (() => {
+  if (typeof window === 'undefined') return null
+
+  try {
+    return getAnalytics(app)
+  } catch {
+    return null
+  }
+})()
 
 export default app

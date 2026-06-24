@@ -4,8 +4,12 @@ import {
   addDoc,
   collection,
   doc,
+  getDocs,
   onSnapshot,
+  query,
+  serverTimestamp,
   updateDoc,
+  where,
   writeBatch,
 } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
@@ -13,7 +17,14 @@ import * as XLSX from 'xlsx'
 import { db, functions } from './firebase/firebase'
 import './App.css'
 
-const builtInEntryKeys = ['email', 'companyName', 'projectId', 'email_sent']
+const builtInEntryKeys = ['email', 'emailLower', 'recipientName', 'companyName', 'projectId', 'email_sent', 'active']
+
+const newEntryDefaults = {
+  email_sent: 'N',
+  active: 'Y',
+}
+
+const entriesPerPage = 25
 
 const projectNameToSlug = (name) =>
   String(name || '')
@@ -38,6 +49,33 @@ const createUniqueSlug = (name, existingProjects) => {
   return slug
 }
 
+const isProjectActive = (project) => project?.active !== 'N'
+
+const formatProjectDateCreated = (dateCreated) => {
+  if (!dateCreated) return ''
+
+  const date = dateCreated.toDate ? dateCreated.toDate() : new Date(dateCreated)
+  if (Number.isNaN(date.getTime())) return ''
+
+  return date.toLocaleDateString()
+}
+
+const getProjectTimestamp = (value) => {
+  if (!value) return 0
+
+  const date = value.toDate ? value.toDate() : new Date(value)
+  const time = date.getTime()
+
+  return Number.isNaN(time) ? 0 : time
+}
+
+const sortProjectsByRecentAccess = (projectList) =>
+  [...projectList].sort(
+    (a, b) =>
+      getProjectTimestamp(b.lastAccessedAt || b.dateCreated) -
+      getProjectTimestamp(a.lastAccessedAt || a.dateCreated)
+  )
+
 const toPlaceholder = (key) => `{{${key}}}`
 
 const fillTemplate = (template, values) => {
@@ -61,8 +99,9 @@ const parseEntryDoc = (entryDoc) => {
   return {
     id: entryDoc.id,
     email: data.email || '',
-    companyName: data.companyName || '',
+    recipientName: data.recipientName || data.companyName || '',
     emailSent: data.email_sent || 'N',
+    active: data.active || 'Y',
     fieldValues,
   }
 }
@@ -76,8 +115,12 @@ const normalizeHeaderName = (header) =>
 const resolveSpreadsheetFieldKey = (header) => {
   const normalized = normalizeHeaderName(header)
   if (['email', 'emailaddress', 'e mail'].includes(normalized)) return 'email'
-  if (['companyname', 'company', 'organization', 'organisation'].includes(normalized)) {
-    return 'companyName'
+  if (
+    ['recipientname', 'recipient', 'companyname', 'company', 'organization', 'organisation'].includes(
+      normalized
+    )
+  ) {
+    return 'recipientName'
   }
 
   const parts = String(header || '')
@@ -115,15 +158,52 @@ const buildSpreadsheetColumnMap = (headers) => {
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase()
 
-const findDuplicateEmailEntry = (email, existingEntries, excludeEntryId = null) => {
-  const normalizedEmail = normalizeEmail(email)
-  if (!normalizedEmail) return null
+const isValidEmail = (value) => {
+  const email = String(value || '').trim()
+  if (!email || /\s/.test(email)) return false
 
-  return (
-    existingEntries.find(
-      (entry) => entry.id !== excludeEntryId && normalizeEmail(entry.email) === normalizedEmail
-    ) || null
+  const atIndex = email.indexOf('@')
+  if (atIndex <= 0 || atIndex !== email.lastIndexOf('@')) return false
+
+  const local = email.slice(0, atIndex)
+  const domain = email.slice(atIndex + 1)
+  if (!local || !domain || !domain.includes('.')) return false
+
+  const domainParts = domain.split('.')
+  if (domainParts.length < 2 || domainParts.some((part) => !part)) return false
+
+  return true
+}
+
+const findDuplicateEmailInDatabase = async (databaseName, email, excludeEntryId = null) => {
+  const trimmedEmail = String(email || '').trim()
+  const emailLower = normalizeEmail(email)
+  if (!emailLower) return null
+
+  const findInSnapshot = (snapshot) =>
+    snapshot.docs.find((entryDoc) => {
+      if (excludeEntryId && entryDoc.id === excludeEntryId) return false
+      return entryDoc.data().active !== 'N'
+    })
+
+  const lowerSnapshot = await getDocs(
+    query(collection(db, databaseName), where('emailLower', '==', emailLower))
   )
+  let duplicateDoc = findInSnapshot(lowerSnapshot)
+
+  if (!duplicateDoc && trimmedEmail) {
+    const emailSnapshot = await getDocs(
+      query(collection(db, databaseName), where('email', '==', trimmedEmail))
+    )
+    duplicateDoc = findInSnapshot(emailSnapshot)
+  }
+
+  if (!duplicateDoc) return null
+
+  return {
+    id: duplicateDoc.id,
+    email: duplicateDoc.data().email || '',
+  }
 }
 
 function App() {
@@ -131,8 +211,11 @@ function App() {
   const { projectSlug } = useParams()
   const [projects, setProjects] = useState([])
   const [projectsReady, setProjectsReady] = useState(false)
-  const matchedProject = projects.find((project) => getProjectSlug(project) === projectSlug)
+  const matchedProject = projects.find(
+    (project) => getProjectSlug(project) === projectSlug && isProjectActive(project)
+  )
   const activeProjectId = matchedProject?.id || ''
+  const activeProjects = sortProjectsByRecentAccess(projects.filter(isProjectActive))
   const [activeProject, setActiveProject] = useState(null)
   const [projectName, setProjectName] = useState('')
   const [databaseName, setDatabaseName] = useState('')
@@ -140,16 +223,16 @@ function App() {
   const [isSavingProject, setIsSavingProject] = useState(false)
 
   const [email, setEmail] = useState('')
-  const [companyName, setCompanyName] = useState('')
+  const [recipientName, setRecipientName] = useState('')
   const [fieldValues, setFieldValues] = useState({})
   const [newFieldKey, setNewFieldKey] = useState('')
   const [newFieldLabel, setNewFieldLabel] = useState('')
   const [fieldDefinitions, setFieldDefinitions] = useState([])
   const [entries, setEntries] = useState([])
+  const [entriesPage, setEntriesPage] = useState(1)
   const [previewEntryId, setPreviewEntryId] = useState(null)
   const [editingEntryId, setEditingEntryId] = useState(null)
-  const [fieldSetupOpen, setFieldSetupOpen] = useState(true)
-  const [importOpen, setImportOpen] = useState(true)
+  const [setupSectionOpen, setSetupSectionOpen] = useState(true)
   const [entrySectionOpen, setEntrySectionOpen] = useState(true)
   const [emailSubject, setEmailSubject] = useState('')
   const [emailTemplate, setEmailTemplate] = useState('')
@@ -159,6 +242,11 @@ function App() {
   const [isImporting, setIsImporting] = useState(false)
   const [importMessage, setImportMessage] = useState('')
   const [skippedImportEmails, setSkippedImportEmails] = useState([])
+  const [skippedInvalidEmails, setSkippedInvalidEmails] = useState([])
+  const [projectToDelete, setProjectToDelete] = useState(null)
+  const [deleteConfirmName, setDeleteConfirmName] = useState('')
+  const [deleteError, setDeleteError] = useState('')
+  const [isDeletingProject, setIsDeletingProject] = useState(false)
 
   const templateLoadedRef = useRef(false)
   const skipTemplateSaveRef = useRef(false)
@@ -166,16 +254,32 @@ function App() {
   const importFileInputRef = useRef(null)
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'Projects'), (snapshot) => {
-      setProjects(snapshot.docs.map((projectDoc) => ({
-        id: projectDoc.id,
-        ...projectDoc.data(),
-      })))
-      setProjectsReady(true)
-    })
+    const unsub = onSnapshot(
+      collection(db, 'Projects'),
+      (snapshot) => {
+        setProjects(snapshot.docs.map((projectDoc) => ({
+          id: projectDoc.id,
+          ...projectDoc.data(),
+        })))
+        setProjectsReady(true)
+      },
+      (error) => {
+        setProjects([])
+        setProjectsReady(true)
+        setProjectError(`Could not load projects: ${error.message}`)
+      }
+    )
 
     return unsub
   }, [])
+
+  useEffect(() => {
+    if (!activeProjectId) return
+
+    updateDoc(doc(db, 'Projects', activeProjectId), {
+      lastAccessedAt: serverTimestamp(),
+    }).catch(() => {})
+  }, [activeProjectId])
 
   useEffect(() => {
     if (!activeProjectId) {
@@ -229,7 +333,9 @@ function App() {
       entriesRef,
       (snapshot) => {
         setEntryError('')
-        const parsedEntries = snapshot.docs.map(parseEntryDoc)
+        const parsedEntries = snapshot.docs
+          .map(parseEntryDoc)
+          .filter((entry) => entry.active !== 'N')
         setEntries(parsedEntries)
 
         if (parsedEntries.length === 0) {
@@ -253,6 +359,10 @@ function App() {
   }, [activeProject?.databaseName])
 
   useEffect(() => {
+    setEntriesPage(1)
+  }, [activeProject?.databaseName])
+
+  useEffect(() => {
     if (!activeProjectId || !templateLoadedRef.current) return
     if (skipTemplateSaveRef.current) {
       skipTemplateSaveRef.current = false
@@ -269,14 +379,35 @@ function App() {
     return () => clearTimeout(timer)
   }, [emailTemplate, emailSubject, activeProjectId])
 
-  const builtInFields = [{ key: 'companyName', label: 'Company Name' }]
+  const builtInFields = [{ key: 'recipientName', label: 'Recipient Name' }]
   const activeFieldDefinitions = fieldDefinitions.filter((field) => field.active)
   const inactiveFieldDefinitions = fieldDefinitions.filter((field) => !field.active)
   const allFieldDefinitions = [...builtInFields, ...activeFieldDefinitions]
   const previewEntry = entries.find((entry) => entry.id === previewEntryId)
+  const totalEntryPages = Math.max(1, Math.ceil(entries.length / entriesPerPage))
+  const safeEntriesPage = Math.min(entriesPage, totalEntryPages)
+  const paginatedEntriesStart = (safeEntriesPage - 1) * entriesPerPage
+  const paginatedEntries = entries.slice(
+    paginatedEntriesStart,
+    paginatedEntriesStart + entriesPerPage
+  )
+  const paginatedEntriesEnd = Math.min(paginatedEntriesStart + entriesPerPage, entries.length)
+
+  useEffect(() => {
+    if (entriesPage > totalEntryPages) {
+      setEntriesPage(totalEntryPages)
+    }
+  }, [entriesPage, totalEntryPages])
+
+  const goToEntryPage = (entryId) => {
+    const entryIndex = entries.findIndex((item) => item.id === entryId)
+    if (entryIndex >= 0) {
+      setEntriesPage(Math.floor(entryIndex / entriesPerPage) + 1)
+    }
+  }
 
   const getEntryValues = (entry) => {
-    const values = { companyName: entry.companyName }
+    const values = { recipientName: entry.recipientName }
     activeFieldDefinitions.forEach((field) => {
       values[field.key] = entry.fieldValues?.[field.key] || ''
     })
@@ -288,7 +419,7 @@ function App() {
       return getEntryValues(previewEntry)
     }
 
-    const values = { companyName: companyName.trim() || 'Your Company' }
+    const values = { recipientName: recipientName.trim() || 'Your Recipient' }
     activeFieldDefinitions.forEach((field) => {
       values[field.key] = fieldValues[field.key]?.trim() || `Your ${field.label}`
     })
@@ -315,11 +446,12 @@ function App() {
     navigate(`/${getProjectSlug(project)}`)
     setEditingEntryId(null)
     setEmail('')
-    setCompanyName('')
+    setRecipientName('')
     setFieldValues({})
     setEntryError('')
     setImportMessage('')
     setSkippedImportEmails([])
+    setSkippedInvalidEmails([])
   }
 
   const handleCloseProject = () => {
@@ -328,13 +460,101 @@ function App() {
     setActiveProject(null)
     setEditingEntryId(null)
     setEmail('')
-    setCompanyName('')
+    setRecipientName('')
     setFieldValues({})
     setEntries([])
     setPreviewEntryId(null)
     setImportMessage('')
     setSkippedImportEmails([])
+    setSkippedInvalidEmails([])
   }
+
+  const handleDeleteProject = (project) => {
+    setProjectToDelete(project)
+    setDeleteConfirmName('')
+    setDeleteError('')
+  }
+
+  const handleCancelDeleteProject = () => {
+    setProjectToDelete(null)
+    setDeleteConfirmName('')
+    setDeleteError('')
+    setIsDeletingProject(false)
+  }
+
+  const handleConfirmDeleteProject = async () => {
+    if (!projectToDelete) return
+
+    if (deleteConfirmName !== projectToDelete.name) {
+      setDeleteError('Project name does not match.')
+      return
+    }
+
+    setIsDeletingProject(true)
+    setDeleteError('')
+
+    try {
+      await updateDoc(doc(db, 'Projects', projectToDelete.id), { active: 'N' })
+      handleCancelDeleteProject()
+
+      if (activeProjectId === projectToDelete.id) {
+        handleCloseProject()
+      }
+    } catch {
+      setDeleteError('Could not delete project.')
+      setIsDeletingProject(false)
+    }
+  }
+
+  const projectDeleteModal = projectToDelete ? (
+    <div className="ProjectDelete">
+      <div className="ProjectDelete-Container">
+        <h2 className="ProjectDelete-Title">Delete Project</h2>
+        <p className="ProjectDelete-Hint">
+          This deletes the project and all its entries. Type{' '}
+          <strong>{projectToDelete.name}</strong> to confirm.
+        </p>
+
+        <label className="ProjectDelete-Label" htmlFor="deleteConfirmName">
+          Project Name
+        </label>
+        <input
+          id="deleteConfirmName"
+          className="ProjectDelete-Input"
+          type="text"
+          value={deleteConfirmName}
+          onChange={(e) => {
+            setDeleteConfirmName(e.target.value)
+            setDeleteError('')
+          }}
+          onPaste={(e) => e.preventDefault()}
+          autoComplete="off"
+          spellCheck={false}
+        />
+
+        {deleteError && <p className="ProjectDelete-Error">{deleteError}</p>}
+
+        <div className="ProjectDelete-Actions">
+          <button
+            className="ProjectDelete-Button"
+            type="button"
+            onClick={handleConfirmDeleteProject}
+            disabled={deleteConfirmName !== projectToDelete.name || isDeletingProject}
+          >
+            {isDeletingProject ? 'Deleting...' : 'Delete Project'}
+          </button>
+          <button
+            className="ProjectDelete-Button ProjectDelete-Button--Cancel"
+            type="button"
+            onClick={handleCancelDeleteProject}
+            disabled={isDeletingProject}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null
 
   const handleCreateProject = async () => {
     const name = projectName.trim()
@@ -369,6 +589,9 @@ function App() {
         email: '',
         subject: '',
         fields: [],
+        active: 'Y',
+        dateCreated: serverTimestamp(),
+        lastAccessedAt: serverTimestamp(),
       })
 
       setProjectName('')
@@ -389,7 +612,7 @@ function App() {
     const key = newFieldKey.trim()
     const label = newFieldLabel.trim()
     if (!key || !label) return
-    if (key === 'companyName') return
+    if (key === 'recipientName') return
 
     const existingField = fieldDefinitions.find((field) => field.key === key)
     if (existingField?.active) return
@@ -448,19 +671,45 @@ function App() {
 
   const handleLoadEntryForEdit = (entry) => {
     setEmail(entry.email)
-    setCompanyName(entry.companyName)
+    setRecipientName(entry.recipientName)
     setFieldValues({ ...(entry.fieldValues || {}) })
     setEditingEntryId(entry.id)
     setPreviewEntryId(entry.id)
+    goToEntryPage(entry.id)
     setEntryError('')
   }
 
   const handleCancelEdit = () => {
     setEditingEntryId(null)
     setEmail('')
-    setCompanyName('')
+    setRecipientName('')
     setFieldValues({})
     setEntryError('')
+  }
+
+  const handleDeleteEntry = async () => {
+    if (!editingEntryId) return
+
+    const entry = entries.find((item) => item.id === editingEntryId)
+    const entryEmail = entry?.email || email.trim()
+    const databaseName = activeDatabaseNameRef.current || activeProject?.databaseName
+    if (!databaseName) return
+
+    const shouldDelete = window.confirm(
+      `Remove ${entryEmail} from this project? The entry will be hidden but kept in the database.`
+    )
+    if (!shouldDelete) return
+
+    try {
+      const entryId = editingEntryId
+      await updateDoc(doc(db, databaseName, entryId), { active: 'N' })
+      handleCancelEdit()
+      if (previewEntryId === entryId) {
+        setPreviewEntryId(null)
+      }
+    } catch {
+      setEntryError('Could not remove entry.')
+    }
   }
 
   const buildEntryData = () => {
@@ -472,13 +721,19 @@ function App() {
 
     return {
       email: email.trim(),
-      companyName: companyName.trim(),
+      emailLower: normalizeEmail(email),
+      recipientName: recipientName.trim(),
       ...savedFieldValues,
     }
   }
 
   const handleAdd = async () => {
-    if (!email.trim() || !companyName.trim()) return
+    if (!email.trim() || !recipientName.trim()) return
+
+    if (!isValidEmail(email)) {
+      setEntryError('Enter a valid email address (e.g. name@example.com).')
+      return
+    }
 
     const databaseName = activeDatabaseNameRef.current || activeProject?.databaseName
     if (!activeProjectId || !databaseName) {
@@ -492,31 +747,32 @@ function App() {
       projectId: activeProjectId,
     }
 
-    const duplicateEntry = findDuplicateEmailEntry(
-      entryData.email,
-      entries,
-      editingEntryId || null
-    )
-    if (duplicateEntry) {
-      setEntryError(`An entry with email ${entryData.email} already exists in this project.`)
-      return
-    }
-
     try {
+      const duplicateEntry = await findDuplicateEmailInDatabase(
+        databaseName,
+        entryData.email,
+        editingEntryId || null
+      )
+      if (duplicateEntry) {
+        setEntryError(`An entry with email ${entryData.email} already exists in this project.`)
+        return
+      }
+
       if (editingEntryId) {
         await updateDoc(doc(db, databaseName, editingEntryId), entryData)
         setPreviewEntryId(editingEntryId)
       } else {
         const entryDoc = await addDoc(collection(db, databaseName), {
           ...entryData,
-          email_sent: 'N',
+          ...newEntryDefaults,
         })
         setPreviewEntryId(entryDoc.id)
+        setEntriesPage(Math.max(1, Math.ceil((entries.length + 1) / entriesPerPage)))
       }
 
       setEditingEntryId(null)
       setEmail('')
-      setCompanyName('')
+      setRecipientName('')
       setFieldValues({})
     } catch (error) {
       setEntryError(error.message || 'Could not save entry.')
@@ -537,6 +793,7 @@ function App() {
     setIsImporting(true)
     setImportMessage('')
     setSkippedImportEmails([])
+    setSkippedInvalidEmails([])
     setEntryError('')
 
     try {
@@ -560,8 +817,8 @@ function App() {
       const columnMap = buildSpreadsheetColumnMap(headers)
       const mappedKeys = new Set(Object.values(columnMap).map((column) => column.key))
 
-      if (!mappedKeys.has('email') || !mappedKeys.has('companyName')) {
-        setEntryError('Spreadsheet needs Email and Company Name columns in the first row.')
+      if (!mappedKeys.has('email') || !mappedKeys.has('recipientName')) {
+        setEntryError('Spreadsheet needs Email and Recipient Name columns in the first row.')
         return
       }
 
@@ -569,7 +826,7 @@ function App() {
       let fieldsChanged = false
 
       Object.values(columnMap).forEach(({ key, label }) => {
-        if (key === 'email' || key === 'companyName') return
+        if (key === 'email' || key === 'recipientName') return
 
         const existingField = nextFields.find((field) => field.key === key)
         if (!existingField) {
@@ -594,17 +851,16 @@ function App() {
       const entriesToImport = []
       let skipped = 0
       const skippedDuplicateEmails = []
-      const existingEmails = new Set(
-        entries.map((entry) => normalizeEmail(entry.email)).filter(Boolean)
-      )
+      const skippedInvalidEmails = []
       const importEmails = new Set()
 
-      rows.forEach((row) => {
+      for (const row of rows) {
         const entryData = {
           projectId: activeProjectId,
-          email_sent: 'N',
+          ...newEntryDefaults,
           email: '',
-          companyName: '',
+          emailLower: '',
+          recipientName: '',
         }
 
         Object.entries(row).forEach(([header, value]) => {
@@ -614,34 +870,46 @@ function App() {
           const cellValue = String(value ?? '').trim()
           if (mapping.key === 'email') {
             entryData.email = cellValue
-          } else if (mapping.key === 'companyName') {
-            entryData.companyName = cellValue
+            entryData.emailLower = normalizeEmail(cellValue)
+          } else if (mapping.key === 'recipientName') {
+            entryData.recipientName = cellValue
           } else {
             entryData[mapping.key] = cellValue
           }
         })
 
-        if (!entryData.email || !entryData.companyName) {
+        if (!entryData.email || !entryData.recipientName) {
           skipped += 1
-          return
+          continue
         }
 
-        const normalizedEmail = normalizeEmail(entryData.email)
-        if (existingEmails.has(normalizedEmail) || importEmails.has(normalizedEmail)) {
+        if (!isValidEmail(entryData.email)) {
+          skippedInvalidEmails.push(entryData.email)
+          continue
+        }
+
+        if (importEmails.has(entryData.emailLower)) {
           skippedDuplicateEmails.push(entryData.email)
-          return
+          continue
         }
 
-        importEmails.add(normalizedEmail)
+        const duplicateEntry = await findDuplicateEmailInDatabase(databaseName, entryData.email)
+        if (duplicateEntry) {
+          skippedDuplicateEmails.push(entryData.email)
+          continue
+        }
+
+        importEmails.add(entryData.emailLower)
         entriesToImport.push(entryData)
-      })
+      }
 
       if (entriesToImport.length === 0) {
         setSkippedImportEmails(skippedDuplicateEmails)
-        if (skippedDuplicateEmails.length > 0) {
+        setSkippedInvalidEmails(skippedInvalidEmails)
+        if (skippedDuplicateEmails.length > 0 || skippedInvalidEmails.length > 0) {
           setImportMessage('No entries imported.')
         } else {
-          setEntryError('No valid rows found. Each row needs an email and company name.')
+          setEntryError('No valid rows found. Each row needs an email and recipient name.')
         }
         return
       }
@@ -660,7 +928,7 @@ function App() {
       }
 
       const fieldCount = Object.values(columnMap).filter(
-        (column) => column.key !== 'email' && column.key !== 'companyName'
+        (column) => column.key !== 'email' && column.key !== 'recipientName'
       ).length
 
       let importSummary = `Imported ${entriesToImport.length} entr${
@@ -672,19 +940,58 @@ function App() {
 
       const skippedNotes = []
       if (skipped > 0) {
-        skippedNotes.push(`${skipped} row${skipped === 1 ? '' : 's'} missing email or company name`)
+        skippedNotes.push(`${skipped} row${skipped === 1 ? '' : 's'} missing email or recipient name`)
+      }
+      if (skippedInvalidEmails.length > 0) {
+        skippedNotes.push(
+          `${skippedInvalidEmails.length} row${skippedInvalidEmails.length === 1 ? '' : 's'} with invalid email`
+        )
       }
       if (skippedNotes.length > 0) {
         importSummary += `. Skipped ${skippedNotes.join(' and ')}`
       }
 
       setSkippedImportEmails(skippedDuplicateEmails)
+      setSkippedInvalidEmails(skippedInvalidEmails)
+      setEntriesPage(Math.max(1, Math.ceil((entries.length + entriesToImport.length) / entriesPerPage)))
       setImportMessage(`${importSummary}.`)
     } catch (error) {
       setEntryError(error.message || 'Could not import spreadsheet.')
     } finally {
       setIsImporting(false)
     }
+  }
+
+  const handleExportSpreadsheet = () => {
+    if (entries.length === 0) return
+
+    const exportColumns = [
+      { key: 'email', label: 'Email' },
+      { key: 'recipientName', label: 'Recipient Name' },
+      ...activeFieldDefinitions.map((field) => ({ key: field.key, label: field.label })),
+    ]
+
+    const rows = entries.map((entry) => {
+      const values = getEntryValues(entry)
+      const row = {}
+
+      exportColumns.forEach((column) => {
+        if (column.key === 'email') {
+          row[column.label] = entry.email
+        } else {
+          row[column.label] = values[column.key] || ''
+        }
+      })
+
+      return row
+    })
+
+    const worksheet = XLSX.utils.json_to_sheet(rows)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Entries')
+
+    const fileName = `${getProjectSlug(activeProject)}-entries.xlsx`
+    XLSX.writeFile(workbook, fileName)
   }
 
   const unsentEntries = entries.filter((entry) => entry.emailSent !== 'Y')
@@ -746,6 +1053,16 @@ function App() {
     }
   }
 
+  if (!projectsReady) {
+    return (
+      <div className="ProjectPicker">
+        <div className="ProjectPicker-Container">
+          <p className="ProjectPicker-Empty">Loading projects...</p>
+        </div>
+      </div>
+    )
+  }
+
   if (!projectSlug) {
     return (
       <div className="ProjectPicker">
@@ -798,11 +1115,11 @@ function App() {
           <div className="ProjectPicker-List">
             <h2 className="ProjectPicker-SectionTitle">Projects</h2>
 
-            {projects.length === 0 ? (
+            {activeProjects.length === 0 ? (
               <p className="ProjectPicker-Empty">No projects yet</p>
             ) : (
               <ul className="ProjectPicker-Items">
-                {projects.map((project) => (
+                {activeProjects.map((project) => (
                   <li key={project.id} className="ProjectPicker-Item">
                     <button
                       className="ProjectPicker-ItemButton"
@@ -811,22 +1128,18 @@ function App() {
                     >
                       <span className="ProjectPicker-ItemName">{project.name}</span>
                       <span className="ProjectPicker-ItemDatabase">/{getProjectSlug(project)}</span>
+                      {formatProjectDateCreated(project.lastAccessedAt || project.dateCreated) && (
+                        <span className="ProjectPicker-ItemDate">
+                          {project.lastAccessedAt ? 'Opened' : 'Created'}{' '}
+                          {formatProjectDateCreated(project.lastAccessedAt || project.dateCreated)}
+                        </span>
+                      )}
                     </button>
                   </li>
                 ))}
               </ul>
             )}
           </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (!projectsReady) {
-    return (
-      <div className="ProjectPicker">
-        <div className="ProjectPicker-Container">
-          <p className="ProjectPicker-Empty">Loading project...</p>
         </div>
       </div>
     )
@@ -856,33 +1169,65 @@ function App() {
             <h1 className="EntryForm-Title">{activeProject?.name || 'MES PTA'}</h1>
             <p className="EntryForm-ProjectMeta">
               Database: <code>{activeProject?.databaseName}</code>
+              {formatProjectDateCreated(activeProject?.dateCreated) && (
+                <>
+                  {' '}
+                  · Created {formatProjectDateCreated(activeProject.dateCreated)}
+                </>
+              )}
             </p>
           </div>
-          <button className="EntryForm-SwitchButton" type="button" onClick={handleCloseProject}>
-            Switch Project
-          </button>
+          <div className="EntryForm-HeaderActions">
+            <button className="EntryForm-SwitchButton" type="button" onClick={handleCloseProject}>
+              Switch Project
+            </button>
+            <button
+              className="EntryForm-DeleteButton"
+              type="button"
+              onClick={() => handleDeleteProject(activeProject)}
+            >
+              Delete Project
+            </button>
+          </div>
         </div>
 
-        <div className="EntryForm-SetupRow">
-          <div className="EntryForm-FieldSetup EntryForm-SetupRow-Fields">
-            <div className="EntryForm-FieldSetupHeader">
-              <h3 className="EntryForm-FieldSetupTitle">
-                Dynamic Fields
+        <div
+          className={`EntryForm-SetupSection${
+            setupSectionOpen ? '' : ' EntryForm-SetupSection--Collapsed'
+          }`}
+        >
+          <div className="EntryForm-SetupSectionHeader">
+            {!setupSectionOpen && (
+              <h3 className="EntryForm-SetupSectionTitle">
+                Dynamic Fields & Excel Functionality
                 {activeFieldDefinitions.length > 0 && (
-                  <span className="EntryForm-FieldSetupCount"> ({activeFieldDefinitions.length})</span>
+                  <span className="EntryForm-SetupSectionCount">
+                    {' '}
+                    ({activeFieldDefinitions.length} field
+                    {activeFieldDefinitions.length === 1 ? '' : 's'})
+                  </span>
                 )}
               </h3>
-              <button
-                className="EntryForm-FieldSetupToggle"
-                type="button"
-                onClick={() => setFieldSetupOpen((open) => !open)}
-              >
-                {fieldSetupOpen ? 'Minimize' : 'Expand'}
-              </button>
-            </div>
+            )}
+            <button
+              className="EntryForm-SetupSectionToggle"
+              type="button"
+              onClick={() => setSetupSectionOpen((open) => !open)}
+            >
+              {setupSectionOpen ? 'Minimize' : 'Expand'}
+            </button>
+          </div>
 
-            {fieldSetupOpen && (
-              <>
+          {setupSectionOpen && (
+            <div className="EntryForm-SetupRow">
+              <div className="EntryForm-FieldSetup EntryForm-SetupRow-Fields">
+                <h3 className="EntryForm-FieldSetupTitle">
+                  Dynamic Fields
+                  {activeFieldDefinitions.length > 0 && (
+                    <span className="EntryForm-FieldSetupCount"> ({activeFieldDefinitions.length})</span>
+                  )}
+                </h3>
+
                 <p className="EntryForm-FieldSetupHint">
                   Field keys are saved to this project and stored on documents in the{' '}
                   <code>{activeProject?.databaseName}</code> collection.
@@ -953,27 +1298,15 @@ function App() {
                     </ul>
                   </div>
                 )}
-              </>
-            )}
-          </div>
+              </div>
 
-          <div className="EntryForm-Import EntryForm-SetupRow-Import">
-            <div className="EntryForm-ImportHeader">
-              <h3 className="EntryForm-ImportTitle">Import Spreadsheet</h3>
-              <button
-                className="EntryForm-ImportToggle"
-                type="button"
-                onClick={() => setImportOpen((open) => !open)}
-              >
-                {importOpen ? 'Minimize' : 'Expand'}
-              </button>
-            </div>
+              <div className="EntryForm-SetupRow-Import">
+              <div className="EntryForm-Import">
+                <h3 className="EntryForm-ImportTitle">Import Spreadsheet</h3>
 
-            {importOpen && (
-              <>
                 <p className="EntryForm-ImportHint">
                   Upload .xlsx, .xls, or .csv. Row 1 should be column headers — at minimum{' '}
-                  <strong>Email</strong> and <strong>Company Name</strong>. Other columns become
+                  <strong>Email</strong> and <strong>Recipient Name</strong>. Other columns become
                   custom fields. Google Sheets: File → Download → Excel or CSV.
                 </p>
 
@@ -1011,9 +1344,43 @@ function App() {
                     </ul>
                   </div>
                 )}
-              </>
-            )}
-          </div>
+
+                {skippedInvalidEmails.length > 0 && (
+                  <div className="EntryForm-ImportSkipped">
+                    <p className="EntryForm-ImportSkippedTitle">
+                      Here are the emails skipped because the format was invalid:
+                    </p>
+                    <ul className="EntryForm-ImportSkippedList">
+                      {skippedInvalidEmails.map((invalidEmail, index) => (
+                        <li key={`${invalidEmail}-${index}`} className="EntryForm-ImportSkippedItem">
+                          {invalidEmail}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              <div className="EntryForm-Export">
+                <h3 className="EntryForm-ExportTitle">Export Spreadsheet</h3>
+
+                <p className="EntryForm-ExportHint">
+                  Download all active entries as .xlsx. Columns match the import format —{' '}
+                  <strong>Email</strong>, <strong>Recipient Name</strong>, plus any custom fields.
+                </p>
+
+                <button
+                  className="EntryForm-Button EntryForm-ExportButton"
+                  type="button"
+                  onClick={handleExportSpreadsheet}
+                  disabled={entries.length === 0}
+                >
+                  Export to Excel
+                </button>
+              </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* <div className="EmailTemplate">
@@ -1039,7 +1406,7 @@ function App() {
               type="text"
               value={emailSubject}
               onChange={(e) => setEmailSubject(e.target.value)}
-              placeholder={`Follow up with ${toPlaceholder('companyName')}`}
+              placeholder={`Follow up with ${toPlaceholder('recipientName')}`}
             />
 
             <label className="EmailTemplate-Label" htmlFor="emailTemplate">
@@ -1050,7 +1417,7 @@ function App() {
               className="EmailTemplate-Textarea"
               value={emailTemplate}
               onChange={(e) => setEmailTemplate(e.target.value)}
-              placeholder={`Hi ${toPlaceholder('companyName')},\n\nWe wanted to reach out about ${toPlaceholder('contactName')}...`}
+              placeholder={`Hi ${toPlaceholder('recipientName')},\n\nWe wanted to reach out about ${toPlaceholder('contactName')}...`}
               rows={6}
             />
 
@@ -1058,7 +1425,7 @@ function App() {
             <p className="EmailTemplate-PreviewHint">
               {previewEntry ? (
                 <>
-                  Previewing entry for <strong>{previewEntry.email}</strong> ({previewEntry.companyName})
+                  Previewing entry for <strong>{previewEntry.email}</strong> ({previewEntry.recipientName})
                 </>
               ) : (
                 <>Add an entry below to preview with real values</>
@@ -1130,16 +1497,16 @@ function App() {
               placeholder="Enter email"
             />
 
-            <label className="EntryForm-Label" htmlFor="companyName">
-              Company Name
+            <label className="EntryForm-Label" htmlFor="recipientName">
+              Recipient Name
             </label>
             <input
-              id="companyName"
+              id="recipientName"
               className="EntryForm-Input"
               type="text"
-              value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
-              placeholder="Enter company name"
+              value={recipientName}
+              onChange={(e) => setRecipientName(e.target.value)}
+              placeholder="Enter recipient name"
             />
 
             {activeFieldDefinitions.length > 0 && (
@@ -1167,13 +1534,22 @@ function App() {
                 {editingEntryId ? 'Save' : 'Add'}
               </button>
               {editingEntryId && (
-                <button
-                  className="EntryForm-Button EntryForm-Button--Cancel"
-                  type="button"
-                  onClick={handleCancelEdit}
-                >
-                  Cancel
-                </button>
+                <>
+                  <button
+                    className="EntryForm-Button EntryForm-Button--Delete"
+                    type="button"
+                    onClick={handleDeleteEntry}
+                  >
+                    Delete
+                  </button>
+                  <button
+                    className="EntryForm-Button EntryForm-Button--Cancel"
+                    type="button"
+                    onClick={handleCancelEdit}
+                  >
+                    Cancel
+                  </button>
+                </>
               )}
             </div>
 
@@ -1190,46 +1566,89 @@ function App() {
             {entries.length === 0 ? (
               <p className="EntryForm-Empty">No entries yet</p>
             ) : (
-              <ul
-                className={`EntryForm-List${
-                  entries.length > 4 ? ' EntryForm-List--Scroll' : ''
-                }`}
-              >
-                {entries.map((entry) => (
-                  <li
-                    key={entry.id}
-                    className={`EntryForm-ListItem${
-                      entry.id === previewEntryId ? ' EntryForm-ListItem--Active' : ''
-                    }${entry.id === editingEntryId ? ' EntryForm-ListItem--Editing' : ''}`}
-                  >
-                    <button
-                      className="EntryForm-ListButton"
-                      type="button"
-                      onClick={() => setPreviewEntryId(entry.id)}
-                      onDoubleClick={() => handleLoadEntryForEdit(entry)}
+              <>
+                <ul className="EntryForm-List EntryForm-List--Scroll">
+                  {paginatedEntries.map((entry) => (
+                    <li
+                      key={entry.id}
+                      className={`EntryForm-ListItem${
+                        entry.id === previewEntryId ? ' EntryForm-ListItem--Active' : ''
+                      }${entry.id === editingEntryId ? ' EntryForm-ListItem--Editing' : ''}`}
                     >
-                      <span className="EntryForm-ListEmail">{entry.email}</span>
-                      <span className="EntryForm-ListCompany">{entry.companyName}</span>
-                      <span
-                        className={`EntryForm-ListStatus${
-                          entry.emailSent === 'Y' ? ' EntryForm-ListStatus--Sent' : ''
-                        }`}
+                      <button
+                        className="EntryForm-ListButton"
+                        type="button"
+                        onClick={() => setPreviewEntryId(entry.id)}
+                        onDoubleClick={() => handleLoadEntryForEdit(entry)}
                       >
-                        {entry.emailSent === 'Y' ? 'Sent' : 'Not sent'}
+                        <span className="EntryForm-ListEmail">{entry.email}</span>
+                        <span className="EntryForm-ListRecipientName">{entry.recipientName}</span>
+                        <span
+                          className={`EntryForm-ListStatus${
+                            entry.emailSent === 'Y' ? ' EntryForm-ListStatus--Sent' : ''
+                          }`}
+                        >
+                          {entry.emailSent === 'Y' ? 'Sent' : 'Not sent'}
+                        </span>
+                        {activeFieldDefinitions.map((field) => {
+                          const value = entry.fieldValues?.[field.key]
+                          if (!value) return null
+                          return (
+                            <span key={field.id} className="EntryForm-ListField">
+                              {field.label}: {value}
+                            </span>
+                          )
+                        })}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+
+                {totalEntryPages > 1 && (
+                  <div className="EntryForm-ListPagination">
+                    <p className="EntryForm-ListPagination-Info">
+                      Showing {paginatedEntriesStart + 1}–{paginatedEntriesEnd} of {entries.length}
+                    </p>
+                    <div className="EntryForm-ListPagination-Controls">
+                      <button
+                        className="EntryForm-ListPagination-Button"
+                        type="button"
+                        onClick={() => setEntriesPage(1)}
+                        disabled={safeEntriesPage <= 1}
+                      >
+                        First
+                      </button>
+                      <button
+                        className="EntryForm-ListPagination-Button"
+                        type="button"
+                        onClick={() => setEntriesPage((page) => Math.max(1, page - 1))}
+                        disabled={safeEntriesPage <= 1}
+                      >
+                        Previous
+                      </button>
+                      <span className="EntryForm-ListPagination-Page">
+                        Page {safeEntriesPage} of {totalEntryPages}
                       </span>
-                      {activeFieldDefinitions.map((field) => {
-                        const value = entry.fieldValues?.[field.key]
-                        if (!value) return null
-                        return (
-                          <span key={field.id} className="EntryForm-ListField">
-                            {field.label}: {value}
-                          </span>
-                        )
-                      })}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+                      <button
+                        className="EntryForm-ListPagination-Button"
+                        type="button"
+                        onClick={() => setEntriesPage((page) => Math.min(totalEntryPages, page + 1))}
+                        disabled={safeEntriesPage >= totalEntryPages}
+                      >
+                        Next
+                      </button>
+                      <button
+                        className="EntryForm-ListPagination-Button"
+                        type="button"
+                        onClick={() => setEntriesPage(totalEntryPages)}
+                        disabled={safeEntriesPage >= totalEntryPages}
+                      >
+                        Last
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
             </div>
@@ -1245,7 +1664,7 @@ function App() {
                   <code>{toPlaceholder(field.key)}</code>
                 </span>
               ))}{' '}
-              in the subject and body.
+              in the subject and body to use dynamic values.
             </p>
 
             <label className="EmailTemplate-Label" htmlFor="emailSubject">
@@ -1257,7 +1676,7 @@ function App() {
               type="text"
               value={emailSubject}
               onChange={(e) => setEmailSubject(e.target.value)}
-              placeholder={`Follow up with ${toPlaceholder('companyName')}`}
+              placeholder={`Follow up with ${toPlaceholder('recipientName')}`}
             />
 
             <label className="EmailTemplate-Label" htmlFor="emailTemplate">
@@ -1268,7 +1687,7 @@ function App() {
               className="EmailTemplate-Textarea"
               value={emailTemplate}
               onChange={(e) => setEmailTemplate(e.target.value)}
-              placeholder={`Hi ${toPlaceholder('companyName')},\n\nWe wanted to reach out about ${toPlaceholder('contactName')}...`}
+              placeholder={`Hi ${toPlaceholder('recipientName')},\n\nWe wanted to reach out about ${toPlaceholder('contactName')}...`}
               rows={6}
             />
 
@@ -1276,7 +1695,7 @@ function App() {
             <p className="EmailTemplate-PreviewHint">
               {previewEntry ? (
                 <>
-                  Previewing entry for <strong>{previewEntry.email}</strong> ({previewEntry.companyName})
+                  Previewing entry for <strong>{previewEntry.email}</strong> ({previewEntry.recipientName})
                 </>
               ) : (
                 <>Add an entry below to preview with real values</>
@@ -1314,6 +1733,7 @@ function App() {
           </div>
         </div>
       </div>
+      {projectDeleteModal}
     </div>
   )
 }
