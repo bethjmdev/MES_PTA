@@ -187,6 +187,22 @@
   margin-bottom: 0.25rem;
 }
 
+.EntryForm-SetupRow {
+  display: flex;
+  gap: 1.5rem;
+  align-items: stretch;
+}
+
+.EntryForm-SetupRow-Fields {
+  flex: 2;
+  min-width: 0;
+}
+
+.EntryForm-SetupRow-Import {
+  flex: 1;
+  min-width: 0;
+}
+
 .EntryForm-FieldSetup {
   margin: 0;
   padding: 1.5rem;
@@ -200,6 +216,64 @@
   margin: 0 0 1.25rem;
   font-size: 1.25rem;
   color: #1a1a2e;
+}
+
+.EntryForm-Import {
+  margin: 0;
+  padding: 1.5rem;
+  border: 1px solid #e8eaed;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.EntryForm-ImportHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.EntryForm-ImportTitle {
+  margin: 0;
+  font-size: 1rem;
+  color: #1a1a2e;
+}
+
+.EntryForm-ImportToggle {
+  padding: 0.35rem 0.65rem;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #5c6370;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.EntryForm-ImportToggle:hover {
+  background: #f0f2f5;
+}
+
+.EntryForm-ImportHint {
+  margin: 0.75rem 0 1rem;
+  font-size: 0.85rem;
+  color: #5c6370;
+  line-height: 1.5;
+}
+
+.EntryForm-ImportInput {
+  display: none;
+}
+
+.EntryForm-ImportButton {
+  margin-top: 0;
+}
+
+.EntryForm-ImportSuccess {
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+  color: #16a34a;
 }
 
 .EntryForm-FieldSetupHeader {

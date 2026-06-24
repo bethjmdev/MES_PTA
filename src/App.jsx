@@ -1,16 +1,42 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   addDoc,
   collection,
   doc,
   onSnapshot,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore'
-import { db } from './firebase/firebase'
+import { httpsCallable } from 'firebase/functions'
+import * as XLSX from 'xlsx'
+import { db, functions } from './firebase/firebase'
 import './App.css'
 
-const activeProjectStorageKey = 'mesPtaActiveProjectId'
 const builtInEntryKeys = ['email', 'companyName', 'projectId', 'email_sent']
+
+const projectNameToSlug = (name) =>
+  String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'project'
+
+const getProjectSlug = (project) => project?.slug || projectNameToSlug(project?.name)
+
+const createUniqueSlug = (name, existingProjects) => {
+  const baseSlug = projectNameToSlug(name)
+  let slug = baseSlug
+  let counter = 2
+  const usedSlugs = new Set(existingProjects.map((project) => getProjectSlug(project)))
+
+  while (usedSlugs.has(slug)) {
+    slug = `${baseSlug}-${counter}`
+    counter += 1
+  }
+
+  return slug
+}
 
 const toPlaceholder = (key) => `{{${key}}}`
 
@@ -41,11 +67,59 @@ const parseEntryDoc = (entryDoc) => {
   }
 }
 
+const normalizeHeaderName = (header) =>
+  String(header || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+
+const resolveSpreadsheetFieldKey = (header) => {
+  const normalized = normalizeHeaderName(header)
+  if (['email', 'emailaddress', 'e mail'].includes(normalized)) return 'email'
+  if (['companyname', 'company', 'organization', 'organisation'].includes(normalized)) {
+    return 'companyName'
+  }
+
+  const parts = String(header || '')
+    .replace(/[^a-zA-Z0-9\s]/g, '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+
+  if (parts.length === 0) return ''
+
+  const key =
+    parts[0].toLowerCase() +
+    parts
+      .slice(1)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+      .join('')
+
+  return key.replace(/[^a-zA-Z0-9]/g, '')
+}
+
+const buildSpreadsheetColumnMap = (headers) => {
+  const columnMap = {}
+
+  headers.forEach((header) => {
+    const key = resolveSpreadsheetFieldKey(header)
+    if (!key) return
+    columnMap[header] = {
+      key,
+      label: String(header).trim() || key,
+    }
+  })
+
+  return columnMap
+}
+
 function App() {
+  const navigate = useNavigate()
+  const { projectSlug } = useParams()
   const [projects, setProjects] = useState([])
-  const [activeProjectId, setActiveProjectId] = useState(
-    () => localStorage.getItem(activeProjectStorageKey) || ''
-  )
+  const [projectsReady, setProjectsReady] = useState(false)
+  const matchedProject = projects.find((project) => getProjectSlug(project) === projectSlug)
+  const activeProjectId = matchedProject?.id || ''
   const [activeProject, setActiveProject] = useState(null)
   const [projectName, setProjectName] = useState('')
   const [databaseName, setDatabaseName] = useState('')
@@ -62,14 +136,19 @@ function App() {
   const [previewEntryId, setPreviewEntryId] = useState(null)
   const [editingEntryId, setEditingEntryId] = useState(null)
   const [fieldSetupOpen, setFieldSetupOpen] = useState(true)
+  const [importOpen, setImportOpen] = useState(true)
   const [emailSubject, setEmailSubject] = useState('')
   const [emailTemplate, setEmailTemplate] = useState('')
   const [entryError, setEntryError] = useState('')
   const [sendError, setSendError] = useState('')
+  const [isSending, setIsSending] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
+  const [importMessage, setImportMessage] = useState('')
 
   const templateLoadedRef = useRef(false)
   const skipTemplateSaveRef = useRef(false)
   const activeDatabaseNameRef = useRef('')
+  const importFileInputRef = useRef(null)
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'Projects'), (snapshot) => {
@@ -77,6 +156,7 @@ function App() {
         id: projectDoc.id,
         ...projectDoc.data(),
       })))
+      setProjectsReady(true)
     })
 
     return unsub
@@ -100,8 +180,7 @@ function App() {
     const unsub = onSnapshot(doc(db, 'Projects', activeProjectId), (snapshot) => {
       if (!snapshot.exists()) {
         setActiveProject(null)
-        setActiveProjectId('')
-        localStorage.removeItem(activeProjectStorageKey)
+        navigate('/')
         return
       }
 
@@ -124,7 +203,7 @@ function App() {
     })
 
     return unsub
-  }, [activeProjectId])
+  }, [activeProjectId, navigate])
 
   useEffect(() => {
     if (!activeProject?.databaseName) return
@@ -217,19 +296,18 @@ function App() {
     })
   }
 
-  const handleOpenProject = (projectId) => {
-    setActiveProjectId(projectId)
-    localStorage.setItem(activeProjectStorageKey, projectId)
+  const handleOpenProject = (project) => {
+    navigate(`/${getProjectSlug(project)}`)
     setEditingEntryId(null)
     setEmail('')
     setCompanyName('')
     setFieldValues({})
     setEntryError('')
+    setImportMessage('')
   }
 
   const handleCloseProject = () => {
-    setActiveProjectId('')
-    localStorage.removeItem(activeProjectStorageKey)
+    navigate('/')
     activeDatabaseNameRef.current = ''
     setActiveProject(null)
     setEditingEntryId(null)
@@ -238,6 +316,7 @@ function App() {
     setFieldValues({})
     setEntries([])
     setPreviewEntryId(null)
+    setImportMessage('')
   }
 
   const handleCreateProject = async () => {
@@ -261,11 +340,14 @@ function App() {
       return
     }
 
+    const slug = createUniqueSlug(name, projects)
+
     setIsSavingProject(true)
 
     try {
-      const projectDoc = await addDoc(collection(db, 'Projects'), {
+      await addDoc(collection(db, 'Projects'), {
         name,
+        slug,
         databaseName: dbName,
         email: '',
         subject: '',
@@ -274,7 +356,7 @@ function App() {
 
       setProjectName('')
       setDatabaseName('')
-      handleOpenProject(projectDoc.id)
+      navigate(`/${slug}`)
     } catch {
       setProjectError('Could not create project. Check your Firebase setup.')
     } finally {
@@ -414,11 +496,138 @@ function App() {
     }
   }
 
-  const buildMailtoLink = (entry) => {
-    const values = getEntryValues(entry)
-    const subject = encodeURIComponent(fillTemplate(emailSubject, values))
-    const body = encodeURIComponent(fillTemplate(emailTemplate, values))
-    return `mailto:${entry.email}?subject=${subject}&body=${body}`
+  const handleSpreadsheetUpload = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    const databaseName = activeDatabaseNameRef.current || activeProject?.databaseName
+    if (!activeProjectId || !databaseName) {
+      setEntryError('Project is still loading. Try again in a moment.')
+      return
+    }
+
+    setIsImporting(true)
+    setImportMessage('')
+    setEntryError('')
+
+    try {
+      const buffer = await file.arrayBuffer()
+      const workbook = XLSX.read(buffer, { type: 'array' })
+      const sheetName = workbook.SheetNames[0]
+
+      if (!sheetName) {
+        setEntryError('Spreadsheet has no sheets.')
+        return
+      }
+
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' })
+
+      if (rows.length === 0) {
+        setEntryError('Spreadsheet has no data rows.')
+        return
+      }
+
+      const headers = Object.keys(rows[0])
+      const columnMap = buildSpreadsheetColumnMap(headers)
+      const mappedKeys = new Set(Object.values(columnMap).map((column) => column.key))
+
+      if (!mappedKeys.has('email') || !mappedKeys.has('companyName')) {
+        setEntryError('Spreadsheet needs Email and Company Name columns in the first row.')
+        return
+      }
+
+      let nextFields = [...fieldDefinitions]
+      let fieldsChanged = false
+
+      Object.values(columnMap).forEach(({ key, label }) => {
+        if (key === 'email' || key === 'companyName') return
+
+        const existingField = nextFields.find((field) => field.key === key)
+        if (!existingField) {
+          nextFields = [...nextFields, { id: key, key, label, active: true }]
+          fieldsChanged = true
+          return
+        }
+
+        if (!existingField.active || existingField.label !== label) {
+          nextFields = nextFields.map((field) =>
+            field.key === key ? { ...field, label, active: true } : field
+          )
+          fieldsChanged = true
+        }
+      })
+
+      if (fieldsChanged) {
+        setFieldDefinitions(nextFields)
+        await saveProjectFields(nextFields)
+      }
+
+      const entriesToImport = []
+      let skipped = 0
+
+      rows.forEach((row) => {
+        const entryData = {
+          projectId: activeProjectId,
+          email_sent: 'N',
+          email: '',
+          companyName: '',
+        }
+
+        Object.entries(row).forEach(([header, value]) => {
+          const mapping = columnMap[header]
+          if (!mapping) return
+
+          const cellValue = String(value ?? '').trim()
+          if (mapping.key === 'email') {
+            entryData.email = cellValue
+          } else if (mapping.key === 'companyName') {
+            entryData.companyName = cellValue
+          } else {
+            entryData[mapping.key] = cellValue
+          }
+        })
+
+        if (!entryData.email || !entryData.companyName) {
+          skipped += 1
+          return
+        }
+
+        entriesToImport.push(entryData)
+      })
+
+      if (entriesToImport.length === 0) {
+        setEntryError('No valid rows found. Each row needs an email and company name.')
+        return
+      }
+
+      const batchSize = 400
+      for (let index = 0; index < entriesToImport.length; index += batchSize) {
+        const batch = writeBatch(db)
+        const chunk = entriesToImport.slice(index, index + batchSize)
+
+        chunk.forEach((entryData) => {
+          const entryRef = doc(collection(db, databaseName))
+          batch.set(entryRef, entryData)
+        })
+
+        await batch.commit()
+      }
+
+      const fieldCount = Object.values(columnMap).filter(
+        (column) => column.key !== 'email' && column.key !== 'companyName'
+      ).length
+
+      setImportMessage(
+        `Imported ${entriesToImport.length} entr${entriesToImport.length === 1 ? 'y' : 'ies'}${
+          fieldCount > 0 ? ` with ${fieldCount} custom field${fieldCount === 1 ? '' : 's'}` : ''
+        }${skipped > 0 ? `. Skipped ${skipped} row${skipped === 1 ? '' : 's'} missing email or company name.` : '.'}`
+      )
+    } catch (error) {
+      setEntryError(error.message || 'Could not import spreadsheet.')
+    } finally {
+      setIsImporting(false)
+    }
   }
 
   const unsentEntries = entries.filter((entry) => entry.emailSent !== 'Y')
@@ -436,12 +645,10 @@ function App() {
       return
     }
 
-    if (unsentEntries.length > 1) {
-      const shouldContinue = window.confirm(
-        `This will open ${unsentEntries.length} emails in your mail app and mark them as sent. You may need to allow pop-ups. Continue?`
-      )
-      if (!shouldContinue) return
-    }
+    const shouldContinue = window.confirm(
+      `Send ${unsentEntries.length} email${unsentEntries.length === 1 ? '' : 's'} from your Gmail account? Each will BCC b.jeanne.mills@gmail.com.`
+    )
+    if (!shouldContinue) return
 
     const databaseName = activeDatabaseNameRef.current || activeProject?.databaseName
     if (!databaseName) {
@@ -449,24 +656,40 @@ function App() {
       return
     }
 
-    unsentEntries.forEach((entry, index) => {
-      setTimeout(() => {
-        window.open(buildMailtoLink(entry), '_blank')
-      }, index * 600)
-    })
+    setIsSending(true)
 
     try {
-      await Promise.all(
-        unsentEntries.map((entry) =>
-          updateDoc(doc(db, databaseName, entry.id), { email_sent: 'Y' })
+      const sendEmails = httpsCallable(functions, 'sendEmails')
+      const { data } = await sendEmails({
+        databaseName,
+        subject: emailSubject,
+        template: emailTemplate,
+        entries: unsentEntries.map((entry) => ({
+          id: entry.id,
+          email: entry.email,
+          values: getEntryValues(entry),
+        })),
+      })
+
+      if (data.failed?.length > 0 && data.sent?.length === 0) {
+        setSendError(data.failed[0].error || 'All emails failed to send.')
+        return
+      }
+
+      if (data.failed?.length > 0) {
+        setSendError(
+          `Sent ${data.sent.length}, failed ${data.failed.length}: ${data.failed[0].error}`
         )
-      )
+        return
+      }
     } catch (error) {
-      setSendError(error.message || 'Could not update sent status.')
+      setSendError(error.message || 'Could not send emails.')
+    } finally {
+      setIsSending(false)
     }
   }
 
-  if (!activeProjectId) {
+  if (!projectSlug) {
     return (
       <div className="ProjectPicker">
         <div className="ProjectPicker-Container">
@@ -527,16 +750,42 @@ function App() {
                     <button
                       className="ProjectPicker-ItemButton"
                       type="button"
-                      onClick={() => handleOpenProject(project.id)}
+                      onClick={() => handleOpenProject(project)}
                     >
                       <span className="ProjectPicker-ItemName">{project.name}</span>
-                      <span className="ProjectPicker-ItemDatabase">{project.databaseName}</span>
+                      <span className="ProjectPicker-ItemDatabase">/{getProjectSlug(project)}</span>
                     </button>
                   </li>
                 ))}
               </ul>
             )}
           </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!projectsReady) {
+    return (
+      <div className="ProjectPicker">
+        <div className="ProjectPicker-Container">
+          <p className="ProjectPicker-Empty">Loading project...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!matchedProject) {
+    return (
+      <div className="ProjectPicker">
+        <div className="ProjectPicker-Container">
+          <h1 className="ProjectPicker-Title">Project not found</h1>
+          <p className="ProjectPicker-Subtitle">
+            No project matches <code>/{projectSlug}</code>
+          </p>
+          <button className="ProjectPicker-Button" type="button" onClick={handleCloseProject}>
+            Back to projects
+          </button>
         </div>
       </div>
     )
@@ -557,97 +806,142 @@ function App() {
           </button>
         </div>
 
-        <div className="EntryForm-FieldSetup">
-          <div className="EntryForm-FieldSetupHeader">
-            <h3 className="EntryForm-FieldSetupTitle">
-              Dynamic Fields
-              {activeFieldDefinitions.length > 0 && (
-                <span className="EntryForm-FieldSetupCount"> ({activeFieldDefinitions.length})</span>
-              )}
-            </h3>
-            <button
-              className="EntryForm-FieldSetupToggle"
-              type="button"
-              onClick={() => setFieldSetupOpen((open) => !open)}
-            >
-              {fieldSetupOpen ? 'Minimize' : 'Expand'}
-            </button>
-          </div>
+        <div className="EntryForm-SetupRow">
+          <div className="EntryForm-FieldSetup EntryForm-SetupRow-Fields">
+            <div className="EntryForm-FieldSetupHeader">
+              <h3 className="EntryForm-FieldSetupTitle">
+                Dynamic Fields
+                {activeFieldDefinitions.length > 0 && (
+                  <span className="EntryForm-FieldSetupCount"> ({activeFieldDefinitions.length})</span>
+                )}
+              </h3>
+              <button
+                className="EntryForm-FieldSetupToggle"
+                type="button"
+                onClick={() => setFieldSetupOpen((open) => !open)}
+              >
+                {fieldSetupOpen ? 'Minimize' : 'Expand'}
+              </button>
+            </div>
 
-          {fieldSetupOpen && (
-            <>
-              <p className="EntryForm-FieldSetupHint">
-                Field keys are saved to this project and stored on documents in the{' '}
-                <code>{activeProject?.databaseName}</code> collection.
-              </p>
+            {fieldSetupOpen && (
+              <>
+                <p className="EntryForm-FieldSetupHint">
+                  Field keys are saved to this project and stored on documents in the{' '}
+                  <code>{activeProject?.databaseName}</code> collection.
+                </p>
 
-              {activeFieldDefinitions.length > 0 && (
-                <ul className="EntryForm-FieldList">
-                  {activeFieldDefinitions.map((field) => (
-                    <li key={field.id} className="EntryForm-FieldListItem">
-                      <span className="EntryForm-FieldListLabel">{field.label}</span>
-                      <code className="EntryForm-FieldListCode">{toPlaceholder(field.key)}</code>
-                      <button
-                        className="EntryForm-FieldRemove"
-                        type="button"
-                        onClick={() => handleRemoveFieldDefinition(field.id)}
-                      >
-                        Remove
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <div className="EntryForm-FieldAdd">
-                <input
-                  className="EntryForm-Input EntryForm-FieldAddInput"
-                  type="text"
-                  value={newFieldLabel}
-                  onChange={(e) => setNewFieldLabel(e.target.value)}
-                  placeholder="In App Label (e.g. Contact Name)"
-                />
-                <input
-                  className="EntryForm-Input EntryForm-FieldAddInput"
-                  type="text"
-                  value={newFieldKey}
-                  onChange={(e) => setNewFieldKey(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
-                  placeholder="Database Item Name (e.g. contactName, letters and numbers only)"
-                />
-                <button
-                  className="EntryForm-Button EntryForm-FieldAddButton"
-                  type="button"
-                  onClick={handleAddFieldDefinition}
-                >
-                  Add Field
-                </button>
-              </div>
-
-              {inactiveFieldDefinitions.length > 0 && (
-                <div className="EntryForm-FieldInactive">
-                  <h4 className="EntryForm-FieldInactiveTitle">Removed Fields</h4>
-                  <p className="EntryForm-FieldInactiveHint">
-                    These fields are hidden but still saved. Add one back anytime.
-                  </p>
+                {activeFieldDefinitions.length > 0 && (
                   <ul className="EntryForm-FieldList">
-                    {inactiveFieldDefinitions.map((field) => (
+                    {activeFieldDefinitions.map((field) => (
                       <li key={field.id} className="EntryForm-FieldListItem">
                         <span className="EntryForm-FieldListLabel">{field.label}</span>
                         <code className="EntryForm-FieldListCode">{toPlaceholder(field.key)}</code>
                         <button
-                          className="EntryForm-FieldRestore"
+                          className="EntryForm-FieldRemove"
                           type="button"
-                          onClick={() => handleRestoreFieldDefinition(field.id)}
+                          onClick={() => handleRemoveFieldDefinition(field.id)}
                         >
-                          Add Back
+                          Remove
                         </button>
                       </li>
                     ))}
                   </ul>
+                )}
+
+                <div className="EntryForm-FieldAdd">
+                  <input
+                    className="EntryForm-Input EntryForm-FieldAddInput"
+                    type="text"
+                    value={newFieldLabel}
+                    onChange={(e) => setNewFieldLabel(e.target.value)}
+                    placeholder="In App Label (e.g. Contact Name)"
+                  />
+                  <input
+                    className="EntryForm-Input EntryForm-FieldAddInput"
+                    type="text"
+                    value={newFieldKey}
+                    onChange={(e) => setNewFieldKey(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
+                    placeholder="Database Item Name (e.g. contactName, letters and numbers only)"
+                  />
+                  <button
+                    className="EntryForm-Button EntryForm-FieldAddButton"
+                    type="button"
+                    onClick={handleAddFieldDefinition}
+                  >
+                    Add Field
+                  </button>
                 </div>
-              )}
-            </>
-          )}
+
+                {inactiveFieldDefinitions.length > 0 && (
+                  <div className="EntryForm-FieldInactive">
+                    <h4 className="EntryForm-FieldInactiveTitle">Removed Fields</h4>
+                    <p className="EntryForm-FieldInactiveHint">
+                      These fields are hidden but still saved. Add one back anytime.
+                    </p>
+                    <ul className="EntryForm-FieldList">
+                      {inactiveFieldDefinitions.map((field) => (
+                        <li key={field.id} className="EntryForm-FieldListItem">
+                          <span className="EntryForm-FieldListLabel">{field.label}</span>
+                          <code className="EntryForm-FieldListCode">{toPlaceholder(field.key)}</code>
+                          <button
+                            className="EntryForm-FieldRestore"
+                            type="button"
+                            onClick={() => handleRestoreFieldDefinition(field.id)}
+                          >
+                            Add Back
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="EntryForm-Import EntryForm-SetupRow-Import">
+            <div className="EntryForm-ImportHeader">
+              <h3 className="EntryForm-ImportTitle">Import Spreadsheet</h3>
+              <button
+                className="EntryForm-ImportToggle"
+                type="button"
+                onClick={() => setImportOpen((open) => !open)}
+              >
+                {importOpen ? 'Minimize' : 'Expand'}
+              </button>
+            </div>
+
+            {importOpen && (
+              <>
+                <p className="EntryForm-ImportHint">
+                  Upload .xlsx, .xls, or .csv. Row 1 should be column headers — at minimum{' '}
+                  <strong>Email</strong> and <strong>Company Name</strong>. Other columns become
+                  custom fields. Google Sheets: File → Download → Excel or CSV.
+                </p>
+
+                <input
+                  ref={importFileInputRef}
+                  className="EntryForm-ImportInput"
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={handleSpreadsheetUpload}
+                  disabled={isImporting}
+                />
+
+                <button
+                  className="EntryForm-Button EntryForm-ImportButton"
+                  type="button"
+                  onClick={() => importFileInputRef.current?.click()}
+                  disabled={isImporting}
+                >
+                  {isImporting ? 'Importing...' : 'Choose File'}
+                </button>
+
+                {importMessage && <p className="EntryForm-ImportSuccess">{importMessage}</p>}
+              </>
+            )}
+          </div>
         </div>
 
         {/* <div className="EmailTemplate">
@@ -721,9 +1015,9 @@ function App() {
                 className="EmailTemplate-SendButton"
                 type="button"
                 onClick={handleSendEmails}
-                disabled={unsentEntries.length === 0}
+                disabled={unsentEntries.length === 0 || isSending}
               >
-                Send Emails
+                {isSending ? 'Sending...' : 'Send Emails'}
               </button>
               {sendError && <p className="EmailTemplate-SendError">{sendError}</p>}
             </div>
@@ -915,9 +1209,9 @@ function App() {
                 className="EmailTemplate-SendButton"
                 type="button"
                 onClick={handleSendEmails}
-                disabled={unsentEntries.length === 0}
+                disabled={unsentEntries.length === 0 || isSending}
               >
-                Send Emails
+                {isSending ? 'Sending...' : 'Send Emails'}
               </button>
               {sendError && <p className="EmailTemplate-SendError">{sendError}</p>}
             </div>
