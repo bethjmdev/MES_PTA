@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   getDocs,
   onSnapshot,
@@ -226,6 +227,7 @@ const findDuplicateEmailInDatabase = async (databaseName, email, excludeEntryId 
 
 function App() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { projectSlug } = useParams()
   const [projects, setProjects] = useState([])
   const [projectsReady, setProjectsReady] = useState(false)
@@ -266,6 +268,10 @@ function App() {
   const [deleteConfirmName, setDeleteConfirmName] = useState('')
   const [deleteError, setDeleteError] = useState('')
   const [isDeletingProject, setIsDeletingProject] = useState(false)
+  const [excludedEmails, setExcludedEmails] = useState([])
+  const [excludedEmailInput, setExcludedEmailInput] = useState('')
+  const [excludedEmailError, setExcludedEmailError] = useState('')
+  const [isSavingExcludedEmail, setIsSavingExcludedEmail] = useState(false)
 
   const templateLoadedRef = useRef(false)
   const skipTemplateSaveRef = useRef(false)
@@ -286,6 +292,27 @@ function App() {
         setProjects([])
         setProjectsReady(true)
         setProjectError(`Could not load projects: ${error.message}`)
+      }
+    )
+
+    return unsub
+  }, [])
+
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, 'ExcludedEmails'),
+      (snapshot) => {
+        const parsedExcludedEmails = snapshot.docs
+          .map((excludedDoc) => ({
+            id: excludedDoc.id,
+            email: excludedDoc.data().email || '',
+            emailLower: excludedDoc.data().emailLower || normalizeEmail(excludedDoc.data().email),
+          }))
+          .sort((emailA, emailB) => emailA.emailLower.localeCompare(emailB.emailLower))
+        setExcludedEmails(parsedExcludedEmails)
+      },
+      (error) => {
+        setExcludedEmailError(`Could not load excluded emails: ${error.message}`)
       }
     )
 
@@ -506,6 +533,48 @@ function App() {
     setImportMessage('')
     setSkippedImportEmails([])
     setSkippedInvalidEmails([])
+  }
+
+  const handleAddExcludedEmail = async () => {
+    const trimmedEmail = excludedEmailInput.trim()
+    if (!trimmedEmail) return
+
+    if (!isValidEmail(trimmedEmail)) {
+      setExcludedEmailError('Enter a valid email address (e.g. name@example.com).')
+      return
+    }
+
+    const emailLower = normalizeEmail(trimmedEmail)
+    if (excludedEmails.some((item) => item.emailLower === emailLower)) {
+      setExcludedEmailError('That email is already on the excluded list.')
+      return
+    }
+
+    setIsSavingExcludedEmail(true)
+    setExcludedEmailError('')
+
+    try {
+      await addDoc(collection(db, 'ExcludedEmails'), {
+        email: trimmedEmail,
+        emailLower,
+        dateCreated: serverTimestamp(),
+      })
+      setExcludedEmailInput('')
+    } catch {
+      setExcludedEmailError('Could not add excluded email.')
+    } finally {
+      setIsSavingExcludedEmail(false)
+    }
+  }
+
+  const handleRemoveExcludedEmail = async (excludedEmailId) => {
+    setExcludedEmailError('')
+
+    try {
+      await deleteDoc(doc(db, 'ExcludedEmails', excludedEmailId))
+    } catch {
+      setExcludedEmailError('Could not remove excluded email.')
+    }
   }
 
   const handleDeleteProject = (project) => {
@@ -857,7 +926,7 @@ function App() {
       const mappedKeys = new Set(Object.values(columnMap).map((column) => column.key))
 
       if (!mappedKeys.has('email') || !mappedKeys.has('recipientName')) {
-        setEntryError('Spreadsheet needs Email and Recipient Name columns in the first row.')
+        setEntryError('Spreadsheet needs email and recipientName columns in the first row.')
         return
       }
 
@@ -1034,6 +1103,12 @@ function App() {
   }
 
   const unsentEntries = entries.filter((entry) => entry.emailSent !== 'Y')
+  const excludedEmailSet = new Set(excludedEmails.map((item) => item.emailLower))
+  const isEntryOnDoNotSendList = (entry) => excludedEmailSet.has(normalizeEmail(entry.email))
+  const sendableEntries = unsentEntries.filter(
+    (entry) => !excludedEmailSet.has(normalizeEmail(entry.email))
+  )
+  const excludedSendCount = unsentEntries.length - sendableEntries.length
 
   const handleSendEmails = async () => {
     setSendError('')
@@ -1043,13 +1118,22 @@ function App() {
       return
     }
 
+    if (sendableEntries.length === 0) {
+      setSendError('All unsent entries are on the do not send list.')
+      return
+    }
+
     if (!emailTemplate.trim()) {
       setSendError('Add an email template before sending.')
       return
     }
 
+    const excludedNote =
+      excludedSendCount > 0
+        ? ` ${excludedSendCount} excluded email${excludedSendCount === 1 ? '' : 's'} will be skipped.`
+        : ''
     const shouldContinue = window.confirm(
-      `Send ${unsentEntries.length} email${unsentEntries.length === 1 ? '' : 's'} from your Gmail account? Each will BCC b.jeanne.mills@gmail.com.`
+      `Send ${sendableEntries.length} email${sendableEntries.length === 1 ? '' : 's'} from your Gmail account?${excludedNote} Each will BCC b.jeanne.mills@gmail.com.`
     )
     if (!shouldContinue) return
 
@@ -1067,7 +1151,7 @@ function App() {
         databaseName,
         subject: emailSubject,
         template: emailTemplate,
-        entries: unsentEntries.map((entry) => ({
+        entries: sendableEntries.map((entry) => ({
           id: entry.id,
           email: entry.email,
           values: getEntryValues(entry),
@@ -1102,12 +1186,96 @@ function App() {
     )
   }
 
+  if (location.pathname === '/excluded') {
+    return (
+      <div className="DoNotSendList">
+        <div className="DoNotSendList-Container">
+          <button className="DoNotSendList-BackButton" type="button" onClick={() => navigate('/')}>
+            Back to Projects
+          </button>
+
+          <h1 className="DoNotSendList-Title">Do Not Send List</h1>
+          <p className="DoNotSendList-Hint">
+            These addresses are skipped when sending from any project. They stay in project
+            databases but will not receive emails.
+          </p>
+
+          <div className="DoNotSendList-Card">
+            <label className="DoNotSendList-Label" htmlFor="excludedEmail">
+              Email
+            </label>
+            <div className="DoNotSendList-AddRow">
+              <input
+                id="excludedEmail"
+                className="DoNotSendList-Input"
+                type="email"
+                value={excludedEmailInput}
+                onChange={(e) => {
+                  setExcludedEmailInput(e.target.value)
+                  setExcludedEmailError('')
+                }}
+                placeholder="name@example.com"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleAddExcludedEmail()
+                }}
+              />
+              <button
+                className="DoNotSendList-Button"
+                type="button"
+                onClick={handleAddExcludedEmail}
+                disabled={isSavingExcludedEmail}
+              >
+                {isSavingExcludedEmail ? 'Adding...' : 'Add'}
+              </button>
+            </div>
+
+            {excludedEmailError && <p className="DoNotSendList-Error">{excludedEmailError}</p>}
+
+            {excludedEmails.length === 0 ? (
+              <p className="DoNotSendList-Empty">No emails on the do not send list yet</p>
+            ) : (
+              <ul className="DoNotSendList-List">
+                {excludedEmails.map((excludedEmail) => (
+                  <li key={excludedEmail.id} className="DoNotSendList-ListItem">
+                    <span className="DoNotSendList-ListEmail">{excludedEmail.email}</span>
+                    <button
+                      className="DoNotSendList-RemoveButton"
+                      type="button"
+                      onClick={() => handleRemoveExcludedEmail(excludedEmail.id)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (!projectSlug) {
     return (
       <div className="ProjectPicker">
         <div className="ProjectPicker-Container">
           <h1 className="ProjectPicker-Title">MES PTA</h1>
+          <button
+            className="ProjectPicker-LinkButton"
+            type="button"
+            onClick={() => navigate('/excluded')}
+          >
+            Do Not Send List
+          </button>
           <p className="ProjectPicker-Subtitle">Choose a project or create a new one</p>
+
+          {/* <button
+            className="ProjectPicker-LinkButton"
+            type="button"
+            onClick={() => navigate('/excluded')}
+          >
+            Do Not Send List
+          </button> */}
 
           <div className="ProjectPicker-Create">
             <h2 className="ProjectPicker-SectionTitle">New Project</h2>
@@ -1690,10 +1858,18 @@ function App() {
                         <span className="EntryForm-ListRecipientName">{entry.recipientName}</span>
                         <span
                           className={`EntryForm-ListStatus${
-                            entry.emailSent === 'Y' ? ' EntryForm-ListStatus--Sent' : ''
+                            isEntryOnDoNotSendList(entry)
+                              ? ' EntryForm-ListStatus--DoNotSend'
+                              : entry.emailSent === 'Y'
+                                ? ' EntryForm-ListStatus--Sent'
+                                : ''
                           }`}
                         >
-                          {entry.emailSent === 'Y' ? 'Sent' : 'Not sent'}
+                          {isEntryOnDoNotSendList(entry)
+                            ? 'Not permitted to send'
+                            : entry.emailSent === 'Y'
+                              ? 'Sent'
+                              : 'Not sent'}
                         </span>
                         {activeFieldDefinitions.map((field) => {
                           const value = entry.fieldValues?.[field.key]
@@ -1834,10 +2010,17 @@ function App() {
                 className="EmailTemplate-SendButton"
                 type="button"
                 onClick={handleSendEmails}
-                disabled={unsentEntries.length === 0 || isSending}
+                disabled={sendableEntries.length === 0 || isSending}
               >
                 {isSending ? 'Sending...' : 'Send Emails'}
               </button>
+              {excludedSendCount > 0 && unsentEntries.length > 0 && (
+                <p className="EmailTemplate-SendHint">
+                  {excludedSendCount} unsent{' '}
+                  {excludedSendCount === 1 ? 'entry is' : 'entries are'} on the do not send list and
+                  will be skipped.
+                </p>
+              )}
               {sendError && <p className="EmailTemplate-SendError">{sendError}</p>}
             </div>
           </div>

@@ -8,6 +8,7 @@ createRoot(document.getElementById('root')).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
+        <Route path="/excluded" element={<App />} />
         <Route path="/" element={<App />} />
         <Route path="/:projectSlug" element={<App />} />
       </Routes>
