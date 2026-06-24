@@ -137,6 +137,7 @@ function App() {
   const [editingEntryId, setEditingEntryId] = useState(null)
   const [fieldSetupOpen, setFieldSetupOpen] = useState(true)
   const [importOpen, setImportOpen] = useState(true)
+  const [entrySectionOpen, setEntrySectionOpen] = useState(true)
   const [emailSubject, setEmailSubject] = useState('')
   const [emailTemplate, setEmailTemplate] = useState('')
   const [entryError, setEntryError] = useState('')
@@ -1024,9 +1025,27 @@ function App() {
           </div>
         </div> */}
 
-        <div className="EntryForm-Row">
-          <div className="EntryForm-Left">
-            <h2 className="EntryForm-SectionTitle">Add Entry</h2>
+        <div className="EntryForm-EntrySection">
+          <div className="EntryForm-EntrySectionHeader">
+            <h3 className="EntryForm-EntrySectionTitle">
+              Add Entry & Entries
+              {entries.length > 0 && (
+                <span className="EntryForm-EntrySectionCount"> ({entries.length})</span>
+              )}
+            </h3>
+            <button
+              className="EntryForm-EntrySectionToggle"
+              type="button"
+              onClick={() => setEntrySectionOpen((open) => !open)}
+            >
+              {entrySectionOpen ? 'Minimize' : 'Expand'}
+            </button>
+          </div>
+
+          {entrySectionOpen && (
+            <div className="EntryForm-Row">
+              <div className="EntryForm-Left">
+                <h2 className="EntryForm-SectionTitle">Add Entry</h2>
 
             <label className="EntryForm-Label" htmlFor="email">
               Email
@@ -1100,7 +1119,11 @@ function App() {
             {entries.length === 0 ? (
               <p className="EntryForm-Empty">No entries yet</p>
             ) : (
-              <ul className="EntryForm-List">
+              <ul
+                className={`EntryForm-List${
+                  entries.length > 4 ? ' EntryForm-List--Scroll' : ''
+                }`}
+              >
                 {entries.map((entry) => (
                   <li
                     key={entry.id}
@@ -1138,6 +1161,8 @@ function App() {
               </ul>
             )}
           </div>
+            </div>
+          )}
         </div>       <div className="EmailTemplate">
           <div className="EmailTemplate-Container">
             <h2 className="EmailTemplate-Title">Email Template</h2>
