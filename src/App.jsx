@@ -26,6 +26,24 @@ const newEntryDefaults = {
 
 const entriesPerPage = 25
 
+const getEntrySortName = (entry) => (entry.recipientName || '').trim().toLowerCase()
+
+const getEntryNameLetter = (entry) => {
+  const name = (entry.recipientName || '').trim()
+  if (!name) return '#'
+  const firstLetter = name.charAt(0).toUpperCase()
+  return /[A-Z]/.test(firstLetter) ? firstLetter : '#'
+}
+
+const sortEntriesByName = (entryList) =>
+  [...entryList].sort((entryA, entryB) =>
+    getEntrySortName(entryA).localeCompare(getEntrySortName(entryB), undefined, {
+      sensitivity: 'base',
+    })
+  )
+
+const entryAlphabetLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
+
 const projectNameToSlug = (name) =>
   String(name || '')
     .trim()
@@ -230,6 +248,7 @@ function App() {
   const [fieldDefinitions, setFieldDefinitions] = useState([])
   const [entries, setEntries] = useState([])
   const [entriesPage, setEntriesPage] = useState(1)
+  const [entryNameFilter, setEntryNameFilter] = useState('')
   const [previewEntryId, setPreviewEntryId] = useState(null)
   const [editingEntryId, setEditingEntryId] = useState(null)
   const [setupSectionOpen, setSetupSectionOpen] = useState(true)
@@ -360,6 +379,7 @@ function App() {
 
   useEffect(() => {
     setEntriesPage(1)
+    setEntryNameFilter('')
   }, [activeProject?.databaseName])
 
   useEffect(() => {
@@ -384,14 +404,23 @@ function App() {
   const inactiveFieldDefinitions = fieldDefinitions.filter((field) => !field.active)
   const allFieldDefinitions = [...builtInFields, ...activeFieldDefinitions]
   const previewEntry = entries.find((entry) => entry.id === previewEntryId)
-  const totalEntryPages = Math.max(1, Math.ceil(entries.length / entriesPerPage))
+  const sortedEntries = sortEntriesByName(entries)
+  const filteredEntries = entryNameFilter
+    ? sortedEntries.filter((entry) => getEntryNameLetter(entry) === entryNameFilter)
+    : sortedEntries
+  const entryLetterCounts = sortedEntries.reduce((counts, entry) => {
+    const letter = getEntryNameLetter(entry)
+    counts[letter] = (counts[letter] || 0) + 1
+    return counts
+  }, {})
+  const totalEntryPages = Math.max(1, Math.ceil(filteredEntries.length / entriesPerPage))
   const safeEntriesPage = Math.min(entriesPage, totalEntryPages)
   const paginatedEntriesStart = (safeEntriesPage - 1) * entriesPerPage
-  const paginatedEntries = entries.slice(
+  const paginatedEntries = filteredEntries.slice(
     paginatedEntriesStart,
     paginatedEntriesStart + entriesPerPage
   )
-  const paginatedEntriesEnd = Math.min(paginatedEntriesStart + entriesPerPage, entries.length)
+  const paginatedEntriesEnd = Math.min(paginatedEntriesStart + entriesPerPage, filteredEntries.length)
 
   useEffect(() => {
     if (entriesPage > totalEntryPages) {
@@ -400,10 +429,20 @@ function App() {
   }, [entriesPage, totalEntryPages])
 
   const goToEntryPage = (entryId) => {
-    const entryIndex = entries.findIndex((item) => item.id === entryId)
+    const entryIndex = filteredEntries.findIndex((item) => item.id === entryId)
     if (entryIndex >= 0) {
       setEntriesPage(Math.floor(entryIndex / entriesPerPage) + 1)
     }
+  }
+
+  const handleEntryNameFilter = (letter) => {
+    setEntryNameFilter(letter)
+    setEntriesPage(1)
+  }
+
+  const handleClearEntryNameFilter = () => {
+    setEntryNameFilter('')
+    setEntriesPage(1)
   }
 
   const getEntryValues = (entry) => {
@@ -767,7 +806,7 @@ function App() {
           ...newEntryDefaults,
         })
         setPreviewEntryId(entryDoc.id)
-        setEntriesPage(Math.max(1, Math.ceil((entries.length + 1) / entriesPerPage)))
+        setEntriesPage(Math.max(1, Math.ceil((sortedEntries.length + 1) / entriesPerPage)))
       }
 
       setEditingEntryId(null)
@@ -1560,13 +1599,79 @@ function App() {
           </div>
 
           <div className="EntryForm-Right">
-            <h2 className="EntryForm-ListTitle">Entries</h2>
-            <p className="EntryForm-ListHint">Click to preview. Double-click to edit.</p>
+            <h2 className="EntryForm-ListTitle">
+              Entries
+              {entryNameFilter && (
+                <span className="EntryForm-ListTitle-Filter">
+                  {' '}
+                  · {entryNameFilter === '#' ? 'Other' : entryNameFilter}
+                </span>
+              )}
+            </h2>
+            <p className="EntryForm-ListHint">
+              Sorted A–Z by name. Click to preview. Double-click to edit.
+            </p>
 
             {entries.length === 0 ? (
-              <p className="EntryForm-Empty">No entries yet</p>
+              <div className="EntryForm-List-Area">
+                <p className="EntryForm-Empty EntryForm-List-Empty">No entries yet</p>
+              </div>
             ) : (
               <>
+                <div className="EntryForm-ListFilter">
+                  <div className="EntryForm-ListFilter-Alphabet">
+                    {entryAlphabetLetters.map((letter) => (
+                      <button
+                        key={letter}
+                        className={`EntryForm-ListFilter-Letter${
+                          entryNameFilter === letter ? ' EntryForm-ListFilter-Letter--Active' : ''
+                        }`}
+                        type="button"
+                        onClick={() => handleEntryNameFilter(letter)}
+                        disabled={!entryLetterCounts[letter]}
+                        title={
+                          entryLetterCounts[letter]
+                            ? `${entryLetterCounts[letter]} name${entryLetterCounts[letter] === 1 ? '' : 's'}`
+                            : 'No names'
+                        }
+                      >
+                        {letter}
+                      </button>
+                    ))}
+                    <button
+                      className={`EntryForm-ListFilter-Letter EntryForm-ListFilter-Letter--Other${
+                        entryNameFilter === '#' ? ' EntryForm-ListFilter-Letter--Active' : ''
+                      }`}
+                      type="button"
+                      onClick={() => handleEntryNameFilter('#')}
+                      disabled={!entryLetterCounts['#']}
+                      title={
+                        entryLetterCounts['#']
+                          ? `${entryLetterCounts['#']} name${entryLetterCounts['#'] === 1 ? '' : 's'}`
+                          : 'No names'
+                      }
+                    >
+                      #
+                    </button>
+                  </div>
+                  {entryNameFilter && (
+                    <button
+                      className="EntryForm-ListFilter-Clear"
+                      type="button"
+                      onClick={handleClearEntryNameFilter}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                {filteredEntries.length === 0 ? (
+                  <div className="EntryForm-List-Area">
+                    <p className="EntryForm-Empty EntryForm-List-Empty">No entries match this filter.</p>
+                  </div>
+                ) : (
+                  <>
+                <div className="EntryForm-List-Area">
                 <ul className="EntryForm-List EntryForm-List--Scroll">
                   {paginatedEntries.map((entry) => (
                     <li
@@ -1603,11 +1708,14 @@ function App() {
                     </li>
                   ))}
                 </ul>
+                </div>
 
                 {totalEntryPages > 1 && (
                   <div className="EntryForm-ListPagination">
                     <p className="EntryForm-ListPagination-Info">
-                      Showing {paginatedEntriesStart + 1}–{paginatedEntriesEnd} of {entries.length}
+                      Showing {paginatedEntriesStart + 1}–{paginatedEntriesEnd} of{' '}
+                      {filteredEntries.length}
+                      {entryNameFilter ? ` (${entries.length} total)` : ''}
                     </p>
                     <div className="EntryForm-ListPagination-Controls">
                       <button
@@ -1647,6 +1755,8 @@ function App() {
                       </button>
                     </div>
                   </div>
+                )}
+                  </>
                 )}
               </>
             )}

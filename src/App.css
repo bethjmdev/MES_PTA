@@ -161,6 +161,74 @@
   color: #8a919c;
 }
 
+.EntryForm-ListTitle-Filter {
+  font-weight: 500;
+  color: #4a6cf7;
+}
+
+.EntryForm-ListFilter {
+  margin-bottom: 0.75rem;
+}
+
+.EntryForm-ListFilter-Alphabet {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.EntryForm-ListFilter-Letter {
+  min-width: 1.6rem;
+  padding: 0.2rem 0.35rem;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #1a1a2e;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.EntryForm-ListFilter-Letter:hover:not(:disabled) {
+  background: #f0f4ff;
+  border-color: #c7d4fc;
+}
+
+.EntryForm-ListFilter-Letter--Active {
+  background: #4a6cf7;
+  border-color: #4a6cf7;
+  color: #fff;
+}
+
+.EntryForm-ListFilter-Letter--Active:hover:not(:disabled) {
+  background: #3d5ce0;
+  border-color: #3d5ce0;
+}
+
+.EntryForm-ListFilter-Letter:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.EntryForm-ListFilter-Letter--Other {
+  min-width: 1.75rem;
+}
+
+.EntryForm-ListFilter-Clear {
+  margin-top: 0.5rem;
+  padding: 0.3rem 0.65rem;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #5c6370;
+  cursor: pointer;
+}
+
+.EntryForm-ListFilter-Clear:hover {
+  background: #f8f9fb;
+}
+
 .EntryForm-Empty {
   margin: 0;
   color: #8a919c;
@@ -172,10 +240,22 @@
   padding: 0;
 }
 
+.EntryForm-List-Area {
+  height: 44rem;
+}
+
 .EntryForm-List--Scroll {
-  max-height: 22rem;
+  height: 100%;
   overflow-y: auto;
   padding-right: 0.25rem;
+}
+
+.EntryForm-List-Empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  margin: 0;
 }
 
 .EntryForm-ListItem {
