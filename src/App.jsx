@@ -113,6 +113,19 @@ const buildSpreadsheetColumnMap = (headers) => {
   return columnMap
 }
 
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase()
+
+const findDuplicateEmailEntry = (email, existingEntries, excludeEntryId = null) => {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail) return null
+
+  return (
+    existingEntries.find(
+      (entry) => entry.id !== excludeEntryId && normalizeEmail(entry.email) === normalizedEmail
+    ) || null
+  )
+}
+
 function App() {
   const navigate = useNavigate()
   const { projectSlug } = useParams()
@@ -145,6 +158,7 @@ function App() {
   const [isSending, setIsSending] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [importMessage, setImportMessage] = useState('')
+  const [skippedImportEmails, setSkippedImportEmails] = useState([])
 
   const templateLoadedRef = useRef(false)
   const skipTemplateSaveRef = useRef(false)
@@ -305,6 +319,7 @@ function App() {
     setFieldValues({})
     setEntryError('')
     setImportMessage('')
+    setSkippedImportEmails([])
   }
 
   const handleCloseProject = () => {
@@ -318,6 +333,7 @@ function App() {
     setEntries([])
     setPreviewEntryId(null)
     setImportMessage('')
+    setSkippedImportEmails([])
   }
 
   const handleCreateProject = async () => {
@@ -476,6 +492,16 @@ function App() {
       projectId: activeProjectId,
     }
 
+    const duplicateEntry = findDuplicateEmailEntry(
+      entryData.email,
+      entries,
+      editingEntryId || null
+    )
+    if (duplicateEntry) {
+      setEntryError(`An entry with email ${entryData.email} already exists in this project.`)
+      return
+    }
+
     try {
       if (editingEntryId) {
         await updateDoc(doc(db, databaseName, editingEntryId), entryData)
@@ -510,6 +536,7 @@ function App() {
 
     setIsImporting(true)
     setImportMessage('')
+    setSkippedImportEmails([])
     setEntryError('')
 
     try {
@@ -566,6 +593,11 @@ function App() {
 
       const entriesToImport = []
       let skipped = 0
+      const skippedDuplicateEmails = []
+      const existingEmails = new Set(
+        entries.map((entry) => normalizeEmail(entry.email)).filter(Boolean)
+      )
+      const importEmails = new Set()
 
       rows.forEach((row) => {
         const entryData = {
@@ -594,11 +626,23 @@ function App() {
           return
         }
 
+        const normalizedEmail = normalizeEmail(entryData.email)
+        if (existingEmails.has(normalizedEmail) || importEmails.has(normalizedEmail)) {
+          skippedDuplicateEmails.push(entryData.email)
+          return
+        }
+
+        importEmails.add(normalizedEmail)
         entriesToImport.push(entryData)
       })
 
       if (entriesToImport.length === 0) {
-        setEntryError('No valid rows found. Each row needs an email and company name.')
+        setSkippedImportEmails(skippedDuplicateEmails)
+        if (skippedDuplicateEmails.length > 0) {
+          setImportMessage('No entries imported.')
+        } else {
+          setEntryError('No valid rows found. Each row needs an email and company name.')
+        }
         return
       }
 
@@ -619,11 +663,23 @@ function App() {
         (column) => column.key !== 'email' && column.key !== 'companyName'
       ).length
 
-      setImportMessage(
-        `Imported ${entriesToImport.length} entr${entriesToImport.length === 1 ? 'y' : 'ies'}${
-          fieldCount > 0 ? ` with ${fieldCount} custom field${fieldCount === 1 ? '' : 's'}` : ''
-        }${skipped > 0 ? `. Skipped ${skipped} row${skipped === 1 ? '' : 's'} missing email or company name.` : '.'}`
-      )
+      let importSummary = `Imported ${entriesToImport.length} entr${
+        entriesToImport.length === 1 ? 'y' : 'ies'
+      }`
+      if (fieldCount > 0) {
+        importSummary += ` with ${fieldCount} custom field${fieldCount === 1 ? '' : 's'}`
+      }
+
+      const skippedNotes = []
+      if (skipped > 0) {
+        skippedNotes.push(`${skipped} row${skipped === 1 ? '' : 's'} missing email or company name`)
+      }
+      if (skippedNotes.length > 0) {
+        importSummary += `. Skipped ${skippedNotes.join(' and ')}`
+      }
+
+      setSkippedImportEmails(skippedDuplicateEmails)
+      setImportMessage(`${importSummary}.`)
     } catch (error) {
       setEntryError(error.message || 'Could not import spreadsheet.')
     } finally {
@@ -940,6 +996,21 @@ function App() {
                 </button>
 
                 {importMessage && <p className="EntryForm-ImportSuccess">{importMessage}</p>}
+
+                {skippedImportEmails.length > 0 && (
+                  <div className="EntryForm-ImportSkipped">
+                    <p className="EntryForm-ImportSkippedTitle">
+                      Here are the emails skipped because they already existed:
+                    </p>
+                    <ul className="EntryForm-ImportSkippedList">
+                      {skippedImportEmails.map((skippedEmail, index) => (
+                        <li key={`${skippedEmail}-${index}`} className="EntryForm-ImportSkippedItem">
+                          {skippedEmail}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </>
             )}
           </div>

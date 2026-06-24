@@ -321,6 +321,29 @@
   color: #16a34a;
 }
 
+.EntryForm-ImportSkipped {
+  margin-top: 0.75rem;
+}
+
+.EntryForm-ImportSkippedTitle {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: #5c6370;
+}
+
+.EntryForm-ImportSkippedList {
+  margin: 0;
+  padding-left: 1.25rem;
+  max-height: 8rem;
+  overflow-y: auto;
+}
+
+.EntryForm-ImportSkippedItem {
+  font-size: 0.85rem;
+  color: #8a919c;
+  word-break: break-all;
+}
+
 .EntryForm-FieldSetupHeader {
   display: flex;
   align-items: center;
